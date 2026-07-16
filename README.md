@@ -1,12 +1,12 @@
-# 🧬 CodeDNA
+# 🧬 CoDNA
 
 > Every codebase has a DNA. We help you decode it.
 
 ## Overview
 
-CodeDNA is an AI-powered software intelligence platform that enables developers to understand complex codebases by analyzing source code, commit history, pull requests, issues, and documentation.
+CoDNA is an AI-powered software intelligence platform that enables developers to understand complex codebases by analyzing source code, commit history, pull requests, issues, and documentation.
 
-Instead of simply answering *what* the code does, CodeDNA explains *why* it exists.
+Instead of simply answering *what* the code does, CoDNA explains *why* it exists.
 
 ## Current Progress
 
