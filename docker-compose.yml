@@ -77,8 +77,14 @@ services:
       context: .
       dockerfile: infra/docker/worker.Dockerfile
     container_name: codna-worker
+    env_file:
+      - path: ./apps/api/.env
+        required: false
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/codna
+      APP_NAME: CodeDNA API
+      APP_VERSION: 0.1.0
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: INFO
     depends_on:

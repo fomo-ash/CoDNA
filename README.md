@@ -18,6 +18,7 @@ Instead of simply answering *what* the code does, CoDNA explains *why* it exists
 - ✅ FastAPI, PostgreSQL, Redis, and Alembic foundation
 - ✅ GitHub OAuth authentication with backend-only token storage
 - ✅ GitHub repository discovery and owner-scoped import
+- ✅ Celery/Redis asynchronous indexing scaffold with persisted job status
 
 ## Tech Stack
 
@@ -50,6 +51,7 @@ apps/api/
 │   └── modules/
 │       ├── auth/
 │       ├── github/
+│       ├── jobs/
 │       └── repositories/
 ├── alembic/
 └── tests/
@@ -60,8 +62,14 @@ apps/api/
 Start the local API and dependencies:
 
 ```bash
-API_PORT=8001 docker compose up -d --build api postgres redis
+API_PORT=8001 docker compose up -d --build api postgres redis worker
 docker compose run --rm --build migrate
 ```
 
-The current discovery/import API is documented in [docs/API.md](docs/API.md). Follow [docs/REPOSITORY_REGISTRATION.md](docs/REPOSITORY_REGISTRATION.md) for OAuth setup, exact `curl` checks, migration verification, and test commands.
+Useful docs:
+
+- [API reference](docs/API.md)
+- [Beginner backend verification guide](docs/BACKEND_VERIFICATION_GUIDE.md)
+- [Frontend teammate workplan](docs/FRONTEND_TEAMMATE_WORKPLAN.md)
+- [Repository registration details](docs/REPOSITORY_REGISTRATION.md)
+- [Async indexing architecture](docs/ASYNC_INDEXING.md)

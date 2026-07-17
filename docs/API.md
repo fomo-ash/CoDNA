@@ -6,6 +6,8 @@ Local development uses `http://localhost:8001` when the API is started with `API
 
 All application routes are under `/api/v1`.
 
+For a full manual verification sequence with beginner explanations, see [Backend Verification Guide](BACKEND_VERIFICATION_GUIDE.md).
+
 ## Authentication
 
 Start GitHub OAuth:
@@ -119,6 +121,37 @@ GET /api/v1/repositories/{repository_id}
 
 Repository list and detail responses are always scoped to the authenticated CodeDNA user.
 
+### Start repository indexing
+
+```http
+POST /api/v1/repositories/{repository_id}/index
+```
+
+This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
+The current task is a stub: it updates job and repository status, simulates work, and completes successfully.
+
+Example response:
+
+```json
+{
+  "repository_id": "00000000-0000-0000-0000-000000000002",
+  "job_id": "00000000-0000-0000-0000-000000000003",
+  "status": "queued"
+}
+```
+
+If the repository already has a queued or running index job, the API returns that existing job instead of enqueueing a duplicate.
+
+## Jobs
+
+### Read job status
+
+```http
+GET /api/v1/jobs/{job_id}
+```
+
+Job responses are scoped through repository ownership, so one user cannot read another user's job.
+
 ## Health
 
 ```http
@@ -136,5 +169,6 @@ GET /api/v1/ready
 | `409` | The caller already imported the GitHub repository |
 | `422` | Invalid query parameters or import payload |
 | `502` | GitHub API failure |
+| `503` | Indexing task could not be enqueued |
 
-Repository cloning, background jobs, indexing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
+Repository cloning, real indexing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.

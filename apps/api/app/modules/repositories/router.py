@@ -15,6 +15,10 @@ from app.modules.github.service import (
     GitHubRepositoryNotFoundError,
     GitHubServiceImpl,
 )
+from app.modules.jobs.dependencies import get_job_service, get_repository_index_task
+from app.modules.jobs.interfaces import JobService
+from app.modules.jobs.schemas import RepositoryIndexJobResponse
+from app.modules.jobs.service import JobRepositoryNotFoundError
 from app.modules.repositories.dependencies import get_repository_service
 from app.modules.repositories.interfaces import RepositoryService
 from app.modules.repositories.schemas import RepositoryImportRequest, RepositoryRead
@@ -84,3 +88,45 @@ async def get_repository(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found.",
         ) from exc
+
+
+@router.post(
+    "/{repository_id}/index",
+    response_model=RepositoryIndexJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def index_repository(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user_record),
+    session: AsyncSession = Depends(get_db_session),
+    job_service: JobService = Depends(get_job_service),
+    index_task=Depends(get_repository_index_task),
+) -> RepositoryIndexJobResponse:
+    try:
+        job, created = await job_service.create_repository_index_job(
+            session,
+            repository_id,
+            current_user.id,
+        )
+    except JobRepositoryNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found.",
+        ) from exc
+
+    if created:
+        try:
+            task_result = index_task.delay(str(job.id), str(repository_id))
+            job = await job_service.attach_celery_task(session, job.id, task_result.id)
+        except Exception as exc:
+            await job_service.mark_failed(session, job.id, "Failed to enqueue indexing task.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to enqueue indexing task.",
+            ) from exc
+
+    return RepositoryIndexJobResponse(
+        repository_id=repository_id,
+        job_id=job.id,
+        status=job.status,
+    )
