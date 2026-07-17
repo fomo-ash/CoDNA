@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret: str | None = None
     jwt_secret: str | None = None
+    github_callback_url: str | None = None
+    github_authorize_url: str | None = None
+    github_token_url: str | None = None
+    github_user_url: str | None = None
+    github_scope: str | None = None
+    frontend_url: str | None = None
+    jwt_algorithm: str | None = None
+    jwt_expire_minutes: int | None = None
+    oauth_state_expire_minutes: int | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
-from app.api.v1.health import router as health_router
+from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.db.session import create_engine
+from app.db.session import create_engine, create_session_factory
+from app.middleware.auth import AuthContextMiddleware
 
 
 @asynccontextmanager
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     logger.info("environment=%s", app_settings.app_env)
 
     app.state.db_engine = create_engine(app_settings)
+    app.state.session_factory = create_session_factory(app.state.db_engine)
     app.state.redis = Redis.from_url(
         app_settings.redis_url,
         encoding="utf-8",
@@ -44,6 +46,7 @@ def create_app() -> FastAPI:
         version=app_settings.app_version,
         lifespan=lifespan,
     )
+    app.add_middleware(AuthContextMiddleware)
     app.state.settings = app_settings
 
     @app.get("/")
@@ -55,7 +58,7 @@ def create_app() -> FastAPI:
             "docs": app.docs_url or "/docs",
         }
 
-    app.include_router(health_router)
+    app.include_router(api_router)
     return app
 
 
