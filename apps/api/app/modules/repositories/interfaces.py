@@ -6,17 +6,23 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.repositories.schemas import RepositoryCreate, RepositoryRead
+from app.modules.github.schemas import GitHubRepository
+from app.modules.repositories.schemas import RepositoryRead
 
 
 class RepositoryService(Protocol):
-    async def list_repositories(self, session: AsyncSession) -> Sequence[RepositoryRead]:
+    async def list_repositories(
+        self,
+        session: AsyncSession,
+        owner_id: UUID,
+    ) -> Sequence[RepositoryRead]:
         ...
 
     async def create_repository(
         self,
         session: AsyncSession,
-        payload: RepositoryCreate,
+        owner_id: UUID,
+        github_repository: GitHubRepository,
     ) -> RepositoryRead:
         ...
 
@@ -24,5 +30,6 @@ class RepositoryService(Protocol):
         self,
         session: AsyncSession,
         repository_id: UUID,
+        owner_id: UUID,
     ) -> RepositoryRead:
         ...

@@ -3,7 +3,6 @@ from __future__ import annotations
 from urllib.parse import urlencode
 from uuid import UUID
 
-import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +13,9 @@ from app.modules.auth.schemas import (
     AuthCallbackQuery,
     AuthTokenResponse,
     CurrentUser,
-    GitHubAccessTokenResponse,
-    GitHubUserProfile,
 )
+from app.modules.github.service import GitHubAuthorizationRequiredError, GitHubIntegrationError, GitHubServiceImpl
+from app.modules.github.schemas import GitHubProfile
 from app.modules.auth.utils.jwt import create_access_token, create_oauth_state_token, decode_oauth_state_token
 
 
@@ -45,9 +44,16 @@ class AuthServiceImpl:
         self._validate_github_settings()
         decode_oauth_state_token(self.settings, payload.state)
 
-        token_response = await self._exchange_code_for_token(payload.code)
-        github_user = await self._fetch_github_user(token_response.access_token)
-        user = await self._upsert_user(session, github_user)
+        github_service = GitHubServiceImpl(self.settings)
+        try:
+            token_response = await github_service.exchange_code(payload.code)
+            github_user = await github_service.get_profile_for_token(token_response.access_token)
+        except (GitHubAuthorizationRequiredError, GitHubIntegrationError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="GitHub authentication failed.",
+            ) from exc
+        user = await self._upsert_user(session, github_user, token_response.access_token)
 
         access_token, expires_in = create_access_token(self.settings, str(user.id))
         return AuthTokenResponse(
@@ -57,6 +63,10 @@ class AuthServiceImpl:
         )
 
     async def get_current_user(self, session: AsyncSession, user_id: str) -> CurrentUser:
+        user = await self.get_current_user_record(session, user_id)
+        return CurrentUser.model_validate(user)
+
+    async def get_current_user_record(self, session: AsyncSession, user_id: str) -> User:
         try:
             parsed_user_id = UUID(user_id)
         except ValueError as exc:
@@ -72,7 +82,7 @@ class AuthServiceImpl:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authenticated user not found.",
             )
-        return CurrentUser.model_validate(user)
+        return user
 
     def _validate_github_settings(self) -> None:
         required = {
@@ -91,70 +101,31 @@ class AuthServiceImpl:
                 detail=f"Missing GitHub OAuth settings: {', '.join(missing)}",
             )
 
-    async def _exchange_code_for_token(self, code: str) -> GitHubAccessTokenResponse:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                self.settings.github_token_url,
-                headers={"Accept": "application/json"},
-                data={
-                    "client_id": self.settings.github_client_id,
-                    "client_secret": self.settings.github_client_secret,
-                    "code": code,
-                    "redirect_uri": self.settings.github_callback_url,
-                },
-            )
-
-        if response.status_code >= 400:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="GitHub token exchange failed.",
-            )
-
-        payload = response.json()
-        if "access_token" not in payload:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="GitHub token exchange response was invalid.",
-            )
-        return GitHubAccessTokenResponse.model_validate(payload)
-
-    async def _fetch_github_user(self, access_token: str) -> GitHubUserProfile:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(
-                self.settings.github_user_url,
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {access_token}",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-
-        if response.status_code >= 400:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="GitHub user profile request failed.",
-            )
-
-        return GitHubUserProfile.model_validate(response.json())
-
-    async def _upsert_user(self, session: AsyncSession, github_user: GitHubUserProfile) -> User:
-        result = await session.execute(select(User).where(User.github_id == str(github_user.id)))
+    async def _upsert_user(
+        self,
+        session: AsyncSession,
+        github_user: GitHubProfile,
+        access_token: str,
+    ) -> User:
+        result = await session.execute(select(User).where(User.github_id == github_user.github_id))
         user = result.scalar_one_or_none()
 
         if user is None:
             user = User(
-                github_id=str(github_user.id),
-                username=github_user.login,
+                github_id=github_user.github_id,
+                username=github_user.username,
                 email=github_user.email,
                 name=github_user.name,
                 avatar_url=github_user.avatar_url,
+                github_access_token=access_token,
             )
             session.add(user)
         else:
-            user.username = github_user.login
+            user.username = github_user.username
             user.email = github_user.email
             user.name = github_user.name
             user.avatar_url = github_user.avatar_url
+            user.github_access_token = access_token
 
         await session.commit()
         await session.refresh(user)

@@ -4,6 +4,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.user import User
 from app.modules.auth.schemas import AuthCallbackQuery, AuthTokenResponse, CurrentUser
 
 
@@ -19,4 +20,7 @@ class AuthService(Protocol):
         ...
 
     async def get_current_user(self, session: AsyncSession, user_id: str) -> CurrentUser:
+        ...
+
+    async def get_current_user_record(self, session: AsyncSession, user_id: str) -> User:
         ...

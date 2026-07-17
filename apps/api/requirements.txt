@@ -7,3 +7,4 @@ asyncpg==0.30.0
 alembic==1.16.4
 PyJWT==2.10.1
 httpx==0.28.1
+pytest==8.4.1

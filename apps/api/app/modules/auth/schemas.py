@@ -34,16 +34,3 @@ class CurrentUser(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-
-class GitHubAccessTokenResponse(BaseModel):
-    access_token: str
-    token_type: str
-    scope: str | None = None
-
-
-class GitHubUserProfile(BaseModel):
-    id: int
-    login: str
-    email: str | None = None
-    name: str | None = None
-    avatar_url: str | None = None

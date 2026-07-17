@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.db.dependencies import get_db_session
+from app.db.models.user import User
 from app.modules.auth.interfaces import AuthService
 from app.modules.auth.service import AuthServiceImpl
 from app.modules.auth.utils.jwt import decode_access_token
@@ -40,5 +41,16 @@ async def get_current_user(
 ):
     try:
         return await service.get_current_user(session, user_id)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+
+
+async def get_current_user_record(
+    user_id: str = Depends(get_authenticated_user_id),
+    session: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
+) -> User:
+    try:
+        return await service.get_current_user_record(session, user_id)
     except NotImplementedError as exc:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc

@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     github_authorize_url: str | None = None
     github_token_url: str | None = None
     github_user_url: str | None = None
+    github_api_url: str | None = None
+    github_repositories_url: str | None = None
     github_scope: str | None = None
     frontend_url: str | None = None
     jwt_algorithm: str | None = None
