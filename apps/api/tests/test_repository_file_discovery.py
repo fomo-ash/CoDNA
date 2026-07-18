@@ -352,20 +352,69 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
             persisted["repository_id"] = repository_id
             persisted["result"] = discovery_result
 
+    class FakeParserService:
+        def parse_repository(self, repository_path, files):
+            persisted["parse_repository_path"] = repository_path
+            persisted["parse_files"] = list(files)
+            return SimpleNamespace(
+                files=[],
+                parsed_files=0,
+                syntax_error_files=0,
+                unsupported_files=0,
+            )
+
+        async def replace_repository_parse_results(self, session, repository_id, parse_result):
+            del session
+            persisted["parse_repository_id"] = repository_id
+            persisted["parse_result"] = parse_result
+
+    class FakeKnowledgeService:
+        def extract_repository(self, context):
+            persisted["knowledge_context"] = context
+            return SimpleNamespace(items=[], total_items=0)
+
+        async def replace_repository_knowledge(self, session, repository_id, extraction_result):
+            del session
+            persisted["knowledge_repository_id"] = repository_id
+            persisted["knowledge_result"] = extraction_result
+
     async def fake_to_thread(function, *args):
         return function(*args)
 
     async def fake_commit():
         return None
 
+    async def fake_flush():
+        return None
+
+    async def fake_execute(statement):
+        del statement
+        file_row = SimpleNamespace(
+            id=uuid4(),
+            repository_id=REPOSITORY_ID,
+            path="app.py",
+            filename="app.py",
+            extension="py",
+            language="Python",
+            is_binary=False,
+        )
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [file_row]))
+
     @asynccontextmanager
     async def fake_worker_session_with_async_commit():
-        yield SimpleNamespace(commit=fake_commit)
+        yield SimpleNamespace(commit=fake_commit, flush=fake_flush, execute=fake_execute)
 
     monkeypatch.setattr(tasks, "worker_session", fake_worker_session_with_async_commit)
     monkeypatch.setattr(tasks, "_get_job_and_repository", fake_get_job_and_repository)
     monkeypatch.setattr(tasks, "RepositoryCloneService", FakeCloneService)
     monkeypatch.setattr(tasks, "RepositoryFileServiceImpl", FakeRepositoryFileService)
+    monkeypatch.setattr(tasks, "RepositoryParserServiceImpl", FakeParserService)
+    monkeypatch.setattr(tasks, "RepositoryKnowledgeServiceImpl", FakeKnowledgeService)
+    monkeypatch.setattr(
+        tasks,
+        "_parse_repository_in_subprocess",
+        lambda repository_path, files: FakeParserService().parse_repository(repository_path, files),
+    )
     monkeypatch.setattr(tasks.asyncio, "to_thread", fake_to_thread)
     monkeypatch.setattr(
         tasks,
@@ -384,6 +433,12 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     assert repository.last_indexed_at is not None
     assert persisted["repository_id"] == REPOSITORY_ID
     assert persisted["result"].stats.total_files == 1
+    assert persisted["parse_repository_id"] == REPOSITORY_ID
+    assert persisted["parse_repository_path"] == tmp_path
+    assert [file.path for file in persisted["parse_files"]] == ["app.py"]
+    assert persisted["knowledge_repository_id"] == REPOSITORY_ID
+    assert persisted["knowledge_context"].repository_id == REPOSITORY_ID
+    assert persisted["knowledge_context"].repository_path == tmp_path
 
 
 def test_worker_failure_path_marks_job_and_repository_failed(monkeypatch, tmp_path) -> None:

@@ -1,267 +1,102 @@
-# Asynchronous Indexing Infrastructure
+# Repository Indexing Pipeline
 
 ## Purpose
 
-This document describes the asynchronous indexing infrastructure milestone after GitHub repository discovery and import.
+This document describes the current repository indexing pipeline.
 
-The goal is to establish the asynchronous execution framework before adding parsing, embeddings, graph generation, or AI functionality.
+Indexing is asynchronous. The API creates a durable job, publishes work to Redis, and returns immediately. A Celery worker then clones the repository, discovers files, parses supported source files, extracts structured repository knowledge, and persists the results for later chunking, embeddings, search, and AI features.
 
-This milestone is implemented as infrastructure only.
-The worker task performs a shallow Git clone into a controlled local workspace, discovers safe file metadata, updates repository and job status, and exits successfully.
+This milestone intentionally stops before embeddings, vector search, graph generation, and AI orchestration.
 
-For the repository inventory schema, API checks, and troubleshooting steps, see [Repository Inventory and File Discovery](REPOSITORY_INVENTORY.md).
+Related API reference: [API.md](API.md).
 
-## Target Flow
+## Current Flow
 
 ```text
 Authenticated client
-        |
-        v
-POST /api/v1/repositories/{repository_id}/index
-        |
-        v
-Create Job record with status=queued
-        |
-        v
-Publish Celery task to Redis broker
-        |
-        v
-Worker executes clone and file discovery task
-        |
-        v
-Update repository and job statuses
-        |
-        v
-GET /api/v1/jobs/{job_id}
+  -> POST /api/v1/repositories/{repository_id}/index
+  -> create or reuse active repository_index job
+  -> publish Celery task to Redis
+  -> worker clones repository
+  -> worker discovers file inventory
+  -> worker parses supported source files with Tree-sitter
+  -> worker extracts structured knowledge
+  -> worker persists inventory, parse results, and knowledge items
+  -> worker marks job completed and repository ready
 ```
 
-Redis is the Celery broker. PostgreSQL remains the source of truth for repositories and jobs. The API must return after enqueueing the task; it must not wait for the worker to finish.
+PostgreSQL is the source of truth. Redis only transports queued work.
 
-## What Each Part Does
+## Pipeline Stages
 
-### FastAPI application
+### 1. Repository Clone
 
-The FastAPI process handles HTTP requests only. It authenticates the user, validates the repository ID, creates the database job record, publishes the task, and returns the job reference.
+The worker shallow-clones the repository into `REPOSITORY_WORKSPACE_PATH`.
 
-The API process does not clone repositories. It must remain responsive while workers process jobs in the background.
+Private repository cloning uses the backend-stored GitHub access token from OAuth. The token is not exposed through API responses.
 
-### PostgreSQL
+### 2. Repository Inventory
 
-PostgreSQL stores the durable state of the system:
+The worker discovers repository files and stores safe metadata:
 
-- Which repository owns the job.
-- Which user owns the repository.
-- Which job status is current.
-- Which Celery task represents the job.
-- When execution started and finished.
-- Why a job failed, when a safe error is available.
+- path
+- filename
+- extension
+- language hint
+- size
+- SHA-256 hash
+- binary flag
 
-Redis and Celery may lose transient runtime state. The database record must still be sufficient for the API to report the last known job state.
+Discovery skips noisy or unsafe paths such as VCS folders, dependency folders, build output, secret-like env files, symlinks, and files above `REPOSITORY_FILE_MAX_BYTES`.
 
-### Redis
+### 3. Source Parsing
 
-Redis is the message broker between the API and the worker:
+Supported source files are parsed with Tree-sitter.
 
-1. The API publishes a task message to Redis.
-2. Redis holds the message until a worker is available.
-3. A Celery worker consumes the message.
-4. Celery acknowledges or retries the task according to its configuration.
+Current parser support:
 
-Redis is not the source of truth for job history. It only transports work.
-
-### Celery application
-
-The Celery application is the shared task registry and broker configuration.
-
-It must be importable in two processes:
-
-- The FastAPI process, to enqueue tasks.
-- The worker process, to discover and execute tasks.
-
-The Celery application should not import the FastAPI application object. This prevents circular imports and keeps worker startup independent from HTTP server startup.
-
-### Worker process
-
-The worker is a separate process from FastAPI. It listens to the Redis broker and executes registered tasks.
-
-The worker performs repository cloning and file metadata discovery in this milestone.
-It does not parse, embed, graph, or analyze source code yet.
-
-### Job service
-
-The job service is the database boundary for job state. Routes and tasks should call the service instead of writing job fields directly.
-
-The service is responsible for:
-
-- Creating a job for an owned repository.
-- Saving the Celery task ID after enqueueing.
-- Loading a job only when the authenticated user owns its repository.
-- Moving a job from `queued` to `running`.
-- Moving a job to `completed` or `failed`.
-- Setting timestamps consistently.
-- Clearing or preserving error information according to the transition.
-
-This boundary allows the clone-first task to be extended later without changing the public API.
-
-## Detailed Request Lifecycle
-
-### Starting an indexing job
-
-When the client calls `POST /api/v1/repositories/{repository_id}/index`:
-
-1. FastAPI extracts the CodeDNA JWT.
-2. The authentication dependency resolves the local user.
-3. The repository service loads the repository using both `repository_id` and `owner_id`.
-4. If no owned repository exists, the route returns `404`.
-5. The job service creates a PostgreSQL row with `status=queued` and `job_type=repository_index`.
-6. The API publishes a Celery task containing the job ID and repository ID.
-7. The job service stores the returned Celery task ID.
-8. The API returns the job ID and `queued` status.
-9. The request ends without waiting for the worker.
-
-The database transaction and enqueue operation need an explicit failure policy. The safest initial policy is to create the job, enqueue the task, save the task ID, and mark the job failed if publishing fails. The implementation must not return `queued` when no task was published.
-
-### Worker execution
-
-When the worker receives the task:
-
-1. The task opens a short-lived database session.
-2. It loads the job by job ID.
-3. It verifies that the job references the expected repository.
-4. It marks the job `running` and records `started_at`.
-5. It changes the repository status to `cloning`.
-6. It shallow-clones the repository into the configured worker workspace.
-7. It marks the repository as `indexing`.
-8. It discovers file metadata from the clone while skipping unsafe or noisy paths.
-9. It replaces the repository's stored file list.
-10. It marks the job `completed` and records `completed_at`.
-11. It changes the repository status to `ready`.
-12. It stores internal clone metadata and public indexing timestamps.
-13. It commits the final transaction and closes the database session.
-
-If an exception occurs:
-
-1. The task catches the failure at the task boundary.
-2. It marks the job `failed`.
-3. It stores a safe, non-secret error message.
-4. It changes the repository status to `failed`.
-5. It commits the failure state.
-6. It re-raises only if the configured Celery retry policy requires another attempt.
-
-The task must never store access tokens, client secrets, database URLs, or full exception payloads in `error_message`.
-
-### Reading a job status
-
-When the client calls `GET /api/v1/jobs/{job_id}`:
-
-1. FastAPI validates the JWT.
-2. The job service queries the job joined to its repository.
-3. The query includes the authenticated owner ID.
-4. A missing job or a job owned by another user returns `404`.
-5. A visible job is serialized through a response schema.
-
-The API reports the database state, not an unaudited value read directly from Redis.
-
-## Job Data Model
-
-The initial job model should remain deliberately small.
-
-| Field | Purpose |
+| Extension | Parser |
 | --- | --- |
-| `id` | Stable public job identifier. |
-| `repository_id` | Repository being processed. |
-| `job_type` | Identifies the work, initially `repository_index`. |
-| `status` | Durable lifecycle state. |
-| `celery_task_id` | Operational ID returned by Celery. |
-| `error_message` | Safe failure summary, nullable. |
-| `started_at` | Time worker execution began, nullable. |
-| `completed_at` | Time execution completed or failed, nullable. |
-| `created_at` | Time the API created the job. |
-| `updated_at` | Time the job record was last changed. |
+| `.py` | Python |
+| `.js` | JavaScript |
+| `.jsx` | JavaScript |
+| `.ts` | TypeScript |
+| `.tsx` | TSX |
 
-The job should have a foreign key to `repositories.id`. The repository ownership check remains necessary even if a future job table also stores `owner_id`, because the repository relationship is the authoritative ownership boundary for this workflow.
+Parse results are stored for every inventoried file:
 
-## Status Transitions
+| Status | Meaning |
+| --- | --- |
+| `parsed` | Supported file parsed with no Tree-sitter syntax errors. |
+| `syntax_error` | Supported file parsed, but Tree-sitter reported syntax errors. |
+| `unsupported` | Text file exists, but no parser is configured yet. |
+| `skipped` | Binary file or intentionally skipped file. |
+| `failed` | Parser failed unexpectedly. |
 
-### Job status
+The parser extracts source-level metadata including source file summaries, imports, symbols, symbol kind, signatures, and start/end lines.
 
-```text
-queued
-  |
-  v
-running
-  |
-  +----> completed
-  |
-  +----> failed
-```
+Parser execution is isolated in a subprocess from the worker's async database process. This keeps native parser failures from corrupting the long-running Celery worker process.
 
-The initial milestone should reject invalid transitions in the service layer. For example, a completed job should not silently move back to running.
+### 4. Knowledge Extraction
 
-### Repository status
+Knowledge extraction runs after inventory and parsing. Extractors are separate modules behind a common interface so new extractors can be added without rewriting the indexing task.
 
-The existing repository enum is reused:
+Current extractors:
 
-```text
-registered -> indexing -> ready
-                    \
-                     -> failed
-```
+| Source type | Extractor | Item types |
+| --- | --- | --- |
+| `source_code` | Tree-sitter parse result extractor | `source_file`, `symbol`, `import` |
+| `documentation` | Markdown extractor | `document`, `document_section` |
+| `database_schema` | Prisma schema extractor | `prisma_schema`, `prisma_model`, `prisma_enum` |
+| `configuration` | Project config extractor | `package_manifest`, `python_project`, `python_requirements`, `typescript_config`, `dockerfile`, `compose_config` |
 
-The task moves from `registered` to `cloning`, then to `ready` or `failed`.
+Markdown extraction captures titles, headings, sections, links, code blocks, and front matter metadata.
 
-`archived` is not changed by the indexing task. An archived repository should be rejected or handled by an explicit future policy rather than silently reactivated.
+Prisma extraction captures models, fields, relations, enums, indexes, and constraints.
 
-## Implemented Module Structure
+Configuration extraction captures dependencies, scripts, package manager signals, frameworks, runtime hints, build commands, Docker commands, Compose services, Python project metadata, and requirements.
 
-The implementation adds these boundaries:
-
-```text
-apps/api/app/
-├── core/
-│   └── celery.py              # Celery application and broker setup
-├── db/
-│   └── models/
-│       └── job.py             # Job ORM model
-├── modules/
-│   ├── jobs/
-│   │   ├── dependencies.py    # Job service dependency
-│   │   ├── enums.py           # Job status and type enums
-│   │   ├── interfaces.py      # Job service protocol
-│   │   ├── router.py          # Job status endpoint
-│   │   ├── schemas.py         # Job API schemas
-│   │   └── service.py         # Job persistence and transitions
-│   └── repositories/
-│       └── router.py          # Index start endpoint
-└── workers/
-    ├── tasks.py               # Stub task entrypoint
-    └── database.py            # Worker session lifecycle if needed
-```
-
-The exact filenames can follow existing project conventions, but the responsibilities should remain separate:
-
-- Celery configuration must not contain repository business logic.
-- Job service must not make GitHub API calls.
-- Repository routes must not execute work synchronously.
-- Tasks must not contain HTTP response logic.
-- Schemas must not contain database queries.
-
-## Configuration
-
-The worker and API need the same broker configuration:
-
-```text
-REDIS_URL=redis://redis:6379/0
-REPOSITORY_WORKSPACE_PATH=/var/lib/codna/repositories
-REPOSITORY_FILE_MAX_BYTES=10485760
-REPOSITORY_FILE_DISCOVERY_LIMIT=5000
-```
-
-The value must continue to come from `Settings`. The worker should receive it through Docker Compose environment injection in the same way as the API.
-
-No new secret is required for public repository cloning. Private repository cloning depends on the backend-only GitHub token already stored from OAuth and on the scopes granted by the GitHub OAuth app.
-
-## Implemented API Contract
+## Key Endpoints
 
 ### Start indexing
 
@@ -274,225 +109,13 @@ Response:
 
 ```json
 {
-  "repository_id": "00000000-0000-0000-0000-000000000002",
-  "job_id": "00000000-0000-0000-0000-000000000003",
-  "status": "queued"
-}
-```
-
-If a queued or running index job already exists for the repository, the API returns that existing job and does not enqueue another Celery task.
-
-### Read job status
-
-```http
-GET /api/v1/jobs/{job_id}
-Authorization: Bearer <codedna-jwt>
-```
-
-The job is visible only when the authenticated user owns the linked repository.
-
-## Database Migration
-
-Alembic revision `20260717_000006_create_jobs_table.py` creates:
-
-- PostgreSQL enum `job_status`: `queued`, `running`, `completed`, `failed`.
-- PostgreSQL enum `job_type`: `repository_index`.
-- Table `jobs`.
-- Indexes for repository lookup, status filtering, type filtering, and Celery task lookup.
-
-The `jobs.repository_id` foreign key cascades on repository deletion because jobs are operational history for that repository registration.
-
-## Docker Process Model
-
-The Compose services have separate responsibilities:
-
-| Service | Responsibility |
-| --- | --- |
-| `api` | FastAPI HTTP server and task producer. |
-| `redis` | Celery broker. |
-| `postgres` | Durable application and job state. |
-| `migrate` | Applies Alembic migrations before use. |
-| `worker` | Celery task consumer and executor. |
-
-The worker command must start Celery, not the FastAPI server and not a placeholder Python module. The API and worker must use compatible application code and configuration.
-
-The worker should depend on healthy Redis and PostgreSQL services. It may start before the API because it does not need to serve HTTP traffic.
-
-## Failure and Duplicate Policies
-
-These policies should be explicit in the implementation.
-
-### Queue failure
-
-If Redis is unavailable while creating a job:
-
-- Do not return `queued`.
-- Mark the job `failed` if the row was already created.
-- Return a controlled `503` or `502` response.
-
-### Worker failure
-
-If the worker task raises:
-
-- Persist `failed` in the job record.
-- Persist `failed` in the repository record.
-- Store only a safe error summary.
-- Keep timestamps available for diagnosis.
-
-### Duplicate indexing request
-
-The initial policy should be one of these and should be documented by the API:
-
-- Return the currently active job when a queued/running job already exists.
-- Return `409 Conflict` for an active duplicate.
-- Allow a new job only after the previous job is completed or failed.
-
-The recommended MVP policy is to return the active job so repeated frontend requests do not create duplicate work.
-
-### Concurrent requests
-
-Two simultaneous start requests must not create duplicate active jobs for the same repository. This requires either a database constraint for active jobs or a transaction-safe service check.
-
-## What This Milestone Does Not Do
-
-The worker must not yet:
-
-- Synchronize branches, commits, issues, or pull requests.
-- Parse code with Tree-sitter.
-- Generate semantic chunks.
-- Call OpenAI or another embedding provider.
-- Write pgvector embeddings.
-- Create graph nodes or edges.
-- Generate AI answers.
-
-The file discovery task proves that a request can move through API, PostgreSQL, Redis, Celery, worker, Git, local workspace storage, filesystem scanning, metadata persistence, and status polling successfully.
-
-## Implementation Order
-
-### 1. Celery application
-
-Create a central Celery application module under the API infrastructure layer.
-
-Responsibilities:
-
-- Read the broker URL from `Settings`.
-- Configure the Redis broker.
-- Register task modules explicitly.
-- Keep task imports independent from FastAPI route imports.
-
-The Celery application should be importable by both the worker process and API-side enqueueing code.
-
-### 2. Redis broker integration
-
-Use the existing `REDIS_URL` setting. Do not create a second queue configuration or hardcode a Redis URL.
-
-The existing FastAPI Redis client is used for application health and cache access. Celery uses the same Redis service through its broker configuration, but the two clients have separate responsibilities.
-
-### 3. Job model and migration
-
-Add a minimal `jobs` table. Suggested fields:
-
-- `id` UUID primary key
-- `repository_id` UUID foreign key
-- `job_type`
-- `status`
-- `celery_task_id`
-- `error_message` nullable
-- `started_at` nullable
-- `completed_at` nullable
-- `created_at`
-- `updated_at`
-
-Initial job statuses:
-
-```text
-queued
-running
-completed
-failed
-```
-
-The job record is the durable status record. Celery state is operational metadata and must not replace the database record.
-
-### 4. Job service
-
-The job service owns database operations:
-
-- Create a queued job.
-- Attach the Celery task ID.
-- Mark a job running.
-- Mark a job completed.
-- Mark a job failed with a safe error message.
-- Load a job scoped to the authenticated repository owner.
-
-The service should expose stable interfaces so the clone-first task can later be extended into the real indexing pipeline.
-
-### 5. Job router and status API
-
-Add an authenticated job status endpoint:
-
-```http
-GET /api/v1/jobs/{job_id}
-```
-
-The response should contain the job ID, repository ID, type, status, task ID if available, timestamps, and error information when failed.
-
-The endpoint must not expose another user's jobs. Ownership should be checked through the repository relationship or an owner field on the job record.
-
-### 6. Worker startup
-
-The worker container should start Celery using the shared application module, for example:
-
-```bash
-celery -A app.workers.celery_app.celery_app worker --loglevel=INFO
-```
-
-Current command:
-
-```bash
-celery -A app.core.celery:celery_app worker --loglevel=INFO
-```
-
-The worker must depend on Redis and PostgreSQL being available. Database access from a task must use a short-lived async session and must always close the session.
-
-### 7. Clone and file discovery background task
-
-The task deliberately performs only repository cloning and safe file metadata discovery:
-
-1. Load the job and repository.
-2. Mark the job `running`.
-3. Set the repository status to `cloning`.
-4. Shallow-clone the repository into the configured workspace.
-5. Set the repository status to `indexing`.
-6. Walk the cloned repository.
-7. Skip VCS folders, dependency folders, build outputs, env files, large files, binary files, and symlinks.
-8. Persist file path, extension, language hint, size, and SHA-256 hash.
-9. Mark the job `completed`.
-10. Set the repository status to `ready`.
-11. Store internal clone path, `last_cloned_at`, and `last_indexed_at`.
-
-The task must not call GitHub synchronization APIs, parse files, generate embeddings, or build graph data.
-
-## Public API Contract
-
-### Start indexing
-
-```http
-POST /api/v1/repositories/{repository_id}/index
-Authorization: Bearer <codedna-jwt>
-```
-
-Expected response:
-
-```json
-{
   "repository_id": "repository-uuid",
   "job_id": "job-uuid",
   "status": "queued"
 }
 ```
 
-The endpoint should return `404` if the repository does not belong to the authenticated user.
+If a queued or running index job already exists for that repository, the API returns the existing active job instead of enqueueing duplicate work.
 
 ### Read job status
 
@@ -501,177 +124,239 @@ GET /api/v1/jobs/{job_id}
 Authorization: Bearer <codedna-jwt>
 ```
 
-Example completed response:
+Expected successful sequence:
 
-```json
-{
-  "id": "job-uuid",
-  "repository_id": "repository-uuid",
-  "job_type": "repository_index",
-  "status": "completed",
-  "celery_task_id": "celery-task-id",
-  "error_message": null,
-  "started_at": "2026-07-17T21:00:00Z",
-  "completed_at": "2026-07-17T21:00:01Z",
-  "created_at": "2026-07-17T21:00:00Z",
-  "updated_at": "2026-07-17T21:00:01Z"
-}
+```text
+queued -> running -> completed
 ```
 
-## Verification Plan
+On success, the linked repository ends as `ready`.
 
-Once implemented, verify the infrastructure in this order.
+### List inventory
 
-### 1. Start the infrastructure
+```http
+GET /api/v1/repositories/{repository_id}/files?page=1&page_size=100
+Authorization: Bearer <codedna-jwt>
+```
+
+### List parse results
+
+```http
+GET /api/v1/repositories/{repository_id}/parse-results?page=1&page_size=100
+Authorization: Bearer <codedna-jwt>
+```
+
+Useful filters:
+
+```http
+GET /api/v1/repositories/{repository_id}/parse-results?status=failed
+GET /api/v1/repositories/{repository_id}/parse-results?status=syntax_error
+GET /api/v1/repositories/{repository_id}/parse-results?language=Python
+```
+
+### List knowledge items
+
+```http
+GET /api/v1/repositories/{repository_id}/knowledge?page=1&page_size=100
+Authorization: Bearer <codedna-jwt>
+```
+
+Useful filters:
+
+```http
+GET /api/v1/repositories/{repository_id}/knowledge?source_type=source_code
+GET /api/v1/repositories/{repository_id}/knowledge?source_type=documentation
+GET /api/v1/repositories/{repository_id}/knowledge?source_type=database_schema
+GET /api/v1/repositories/{repository_id}/knowledge?source_type=configuration
+GET /api/v1/repositories/{repository_id}/knowledge?item_type=symbol
+GET /api/v1/repositories/{repository_id}/knowledge?path_prefix=src/
+```
+
+## Docker Verification
+
+Build images after backend code changes:
 
 ```bash
-API_PORT=8001 docker compose up -d --build api postgres redis worker
-docker compose run --rm --build migrate
+docker compose build api worker migrate
 ```
 
-### 2. Confirm the worker is running
+Start dependencies:
+
+```bash
+docker compose up -d postgres redis
+```
+
+Apply migrations:
+
+```bash
+docker compose run --rm migrate
+```
+
+Start API and worker. If local port `8000` is already in use, publish the API on `8001`:
+
+```bash
+API_PORT=8001 docker compose up -d api worker
+```
+
+Check services:
 
 ```bash
 docker compose ps
 docker compose logs --tail=100 worker
 ```
 
-The worker should connect to Redis and report that it is ready to receive tasks.
-
-### 3. Start a job
-
-Use a repository already imported through GitHub discovery:
+Check API health:
 
 ```bash
-curl -i -X POST \
-  "http://localhost:8001/api/v1/repositories/{repository_id}/index" \
-  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+curl -i http://localhost:8001/api/v1/health
 ```
 
-Expected status: `202 Accepted` or the agreed asynchronous success status, with `status` equal to `queued`.
+If the API is healthy inside Docker but host curl fails immediately, wait a few seconds and retry. WSL/Windows port forwarding can lag briefly after container recreation.
 
-### 4. Poll job status
+## Manual 2-3 Repository Test
+
+Set the API URL and token:
 
 ```bash
-curl -i \
-  "http://localhost:8001/api/v1/jobs/{job_id}" \
-  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+export API=http://localhost:8001/api/v1
+export TOKEN="paste-codedna-jwt-here"
 ```
 
-The expected sequence is:
+For each test repository:
+
+```bash
+curl -s -X POST "$API/repositories" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"full_name":"OWNER/REPO"}'
+```
+
+Copy the returned repository `id`, then start indexing:
+
+```bash
+curl -s -X POST "$API/repositories/REPOSITORY_ID/index" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Copy the returned `job_id`, then poll:
+
+```bash
+curl -s "$API/jobs/JOB_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+After `status` becomes `completed`, verify the outputs:
+
+```bash
+curl -s "$API/repositories/REPOSITORY_ID/files?page_size=20" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -s "$API/repositories/REPOSITORY_ID/parse-results?page_size=20" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -s "$API/repositories/REPOSITORY_ID/knowledge?page_size=20" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Recommended coverage:
+
+- One Python repository.
+- One JavaScript/TypeScript frontend repository.
+- One repository with docs and project configuration, such as `README.md`, `package.json`, `pyproject.toml`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`, or `prisma/schema.prisma`.
+
+Expected result:
+
+- Repository status is `ready`.
+- Job status is `completed`.
+- Inventory rows exist.
+- Parse rows exist for all inventoried files.
+- Knowledge items exist for source code and any available docs/schema/config files.
+- Unsupported files are expected for formats without a parser, such as CSS, SVG, HTML, lockfiles, media, fonts, and some config files.
+
+## Troubleshooting
+
+### Migration appears stuck
+
+Check whether the migration already applied:
+
+```bash
+docker compose exec -T postgres psql -U postgres -d codna -c "select * from alembic_version;"
+```
+
+The current repository knowledge milestone expects:
 
 ```text
-queued -> running -> completed
+20260718_000010
 ```
 
-The repository should end in `ready` after the clone and inventory task completes.
-
-### 5. List discovered files
+Also confirm the new tables exist:
 
 ```bash
-curl -i \
-  "http://localhost:8001/api/v1/repositories/{repository_id}/files?page=1&page_size=100" \
-  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+docker compose exec -T postgres psql -U postgres -d codna -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('repository_file_parses','repository_knowledge_items') order by table_name;"
 ```
 
-Expected status: `200 OK`.
+If the DB is already at the latest revision and the one-off migrate container is still running with no new logs, stop only that one-off container and continue.
 
-Expected response shape:
+### API port is already allocated
 
-```json
-{
-  "files": [
-    {
-      "path": "README.md",
-      "extension": "md",
-      "language": "Markdown",
-      "size_bytes": 1234
-    }
-  ],
-  "page": 1,
-  "page_size": 100,
-  "has_next_page": false
-}
-```
-
-Fetch persisted inventory statistics:
+Use another host port:
 
 ```bash
-curl -i \
-  "http://localhost:8001/api/v1/repositories/{repository_id}/stats" \
-  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+API_PORT=8001 docker compose up -d api worker
 ```
 
-### 6. Verify failure and ownership behavior
+Then use:
 
-Test that:
-
-- Requests without a JWT return `401`.
-- A job belonging to another user returns `404`.
-- A missing repository returns `404`.
-- Worker failures produce a `failed` job and repository status `failed`.
-- Repeating the request follows an explicit duplicate-job policy.
-
-## Testing Requirements
-
-The milestone should include tests for:
-
-- Celery application broker configuration.
-- Job creation and queued response.
-- Celery task enqueueing with the expected payload.
-- Job status lookup.
-- Unauthorized job access.
-- Missing repository handling.
-- Clone task success transitions.
-- Clone task failure transitions.
-- Repository file discovery.
-- Ignore rules, binary detection, language detection, hash generation, and statistics generation.
-- Inventory pagination, filtering, persistence, and ownership checks.
-
-The tests should mock Celery enqueueing and use isolated database/service boundaries. They should not require a live GitHub API.
-
-## Future Replacement
-
-The public onboarding contract should remain unchanged when clone-first indexing is extended:
-
-```text
-Repository onboarding
-        |
-        v
-Job record + Celery task
-        |
-        v
-Clone repository
-        |
-        v
-Discover repository inventory
-        |
-        v
-Parse with Tree-sitter
-        |
-        v
-Chunk and embed
-        |
-        v
-Build graph and mark ready
+```bash
+export API=http://localhost:8001/api/v1
 ```
 
-Only the task implementation and supporting pipeline services should change. The repository onboarding route, job status route, job record, and task identity should remain stable.
+### Worker fails or a job stays running
 
-## Milestone Acceptance Criteria
+Check worker logs:
 
-The milestone is complete only when all of the following are true:
+```bash
+docker compose logs --tail=200 worker
+```
 
-- The API can create a job for an authenticated repository owner.
-- The API returns a stable `job_id` and `queued` status.
-- The task is visible to and consumed by the Celery worker.
-- The worker can update PostgreSQL job state.
-- The worker can update repository state.
-- The worker persists repository file inventory and repository statistics before marking a repository ready.
-- The status endpoint reports queued, running, completed, and failed states correctly.
-- Unauthorized users cannot start or read jobs.
-- Unauthorized users cannot read another user's repository inventory or statistics.
-- Duplicate active indexing requests follow the documented policy.
-- API, worker, Redis, PostgreSQL, and migration containers work together in Docker.
-- Tests cover producer behavior, task transitions, inventory discovery, failure handling, and ownership checks.
-- Extending the inventory task into parser stages does not require changing the repository onboarding API contract.
+Check persisted job and repository state:
+
+```bash
+docker compose exec -T postgres psql -U postgres -d codna -c "select id, repository_id, status, error_message, started_at, completed_at from jobs order by created_at desc limit 10;"
+```
+
+If a worker process crashes, the job can remain `running` because the process died before the failure handler wrote state. The worker logs are the source for diagnosing that case.
+
+### Parsing crashes
+
+Parser work runs in a subprocess. A parser subprocess failure should now fail the job with a controlled error instead of crashing the Celery worker process.
+
+The worker uses byte offsets to compute source line numbers and serializes parse results through plain JSON before database persistence.
+
+## Current Acceptance Criteria
+
+This milestone is complete when:
+
+- Authenticated users can import repositories.
+- Authenticated repository owners can enqueue indexing jobs.
+- Duplicate active index requests return the existing active job.
+- Worker clones the repository into its controlled workspace.
+- Worker persists repository inventory and statistics.
+- Worker persists parse rows for discovered files.
+- Worker extracts source code, documentation, database schema, and configuration knowledge.
+- Job status moves to `completed` on success and repository status moves to `ready`.
+- Failed worker execution records a safe error summary and repository status moves to `failed`.
+- Inventory, parse result, and knowledge endpoints are owner-scoped.
+- Focused backend tests pass.
+
+## Next Milestones
+
+Do next:
+
+1. Add chunking on top of the structured knowledge layer.
+2. Add embeddings for chunks and store vectors in PostgreSQL/pgvector.
+3. Add retrieval APIs over chunks and metadata filters.
+4. Add AI answer orchestration using retrieved chunks as context.
+5. Add graph generation after stable entities and relationships are available.
+
+Do not skip straight to AI orchestration. The retrieval layer needs stable chunks and metadata first.

@@ -20,6 +20,8 @@ Instead of simply answering *what* the code does, CoDNA explains *why* it exists
 - ✅ GitHub repository discovery and owner-scoped import
 - ✅ Celery/Redis asynchronous indexing scaffold with persisted job status
 - ✅ Repository cloning scaffold with worker-managed local workspace
+- ✅ Repository file inventory and Tree-sitter parse metadata for Python, JavaScript, TypeScript, and TSX
+- ✅ Structured repository knowledge extraction for source code, Markdown docs, Prisma schema, and project configuration
 
 ## Tech Stack
 
@@ -63,9 +65,13 @@ apps/api/
 Start the local API and dependencies:
 
 ```bash
-API_PORT=8001 docker compose up -d --build api postgres redis worker
+docker compose build api worker migrate
+docker compose up -d postgres redis
 docker compose run --rm --build migrate
+API_PORT=8001 docker compose up -d api worker
 ```
+
+Use `API_PORT=8001` when local port `8000` is already allocated.
 
 Useful docs:
 

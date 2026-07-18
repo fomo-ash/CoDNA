@@ -130,8 +130,8 @@ POST /api/v1/repositories/{repository_id}/index
 ```
 
 This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
-The current task shallow-clones the repository into the worker workspace, discovers source file metadata, records clone/index metadata, and completes successfully.
-It does not parse code, generate embeddings, build a graph, or call AI yet.
+The current task shallow-clones the repository into the worker workspace, discovers source file metadata, parses supported source files with Tree-sitter, extracts structured repository knowledge, records clone/index metadata, and completes successfully.
+It does not generate embeddings, build a graph, or call AI yet.
 
 Example response:
 
@@ -191,6 +191,141 @@ Example response:
 
 Known binary asset extensions, files larger than 10 MB, secret-like env files, dependency directories, build output, editor directories, and VCS directories are skipped during discovery. Other binary files are inventoried with `is_binary=true` and no detected source language.
 
+### List repository parse results
+
+```http
+GET /api/v1/repositories/{repository_id}/parse-results?page=1&page_size=100
+```
+
+This returns Tree-sitter parse metadata from the latest successful indexing job. Parse results are scoped to the authenticated owner.
+
+Query parameters:
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `page` | Positive page number | `1` |
+| `page_size` | `1` to `500` parse results per page | `100` |
+| `status` | Optional exact parse status filter | none |
+| `language` | Optional exact detected language filter | none |
+| `path_prefix` | Optional repository-relative path prefix filter | none |
+
+Supported parse statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `parsed` | File parsed without Tree-sitter syntax errors |
+| `syntax_error` | Tree-sitter parsed the file but reported syntax errors |
+| `unsupported` | File is text but no grammar is configured yet |
+| `skipped` | File is binary and intentionally not parsed |
+| `failed` | Parser failed to read or parse the file |
+
+Example response:
+
+```json
+{
+  "parse_results": [
+    {
+      "id": "00000000-0000-0000-0000-000000000005",
+      "repository_id": "00000000-0000-0000-0000-000000000002",
+      "repository_file_id": "00000000-0000-0000-0000-000000000004",
+      "path": "src/app.py",
+      "language": "Python",
+      "parser": "python",
+      "status": "parsed",
+      "root_node_type": "module",
+      "has_error": false,
+      "error_count": 0,
+      "symbol_count": 1,
+      "import_count": 1,
+      "symbols": [
+        {
+          "name": "build",
+          "kind": "function",
+          "start_line": 3,
+          "end_line": 4
+        }
+      ],
+      "imports": [
+        {
+          "statement": "import os",
+          "start_line": 1,
+          "end_line": 1
+        }
+      ],
+      "parsed_at": "2026-07-18T00:00:00Z",
+      "error_message": null,
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "page": 1,
+  "page_size": 100,
+  "has_next_page": false
+}
+```
+
+Current Tree-sitter support covers Python, JavaScript, TypeScript, and TSX. Unsupported text files still get a persisted status so the parser stage is auditable.
+
+### List repository knowledge items
+
+```http
+GET /api/v1/repositories/{repository_id}/knowledge?page=1&page_size=100
+```
+
+This returns structured knowledge extracted after inventory and parsing. The endpoint is scoped to the authenticated owner.
+
+Query parameters:
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `page` | Positive page number | `1` |
+| `page_size` | `1` to `500` knowledge items per page | `100` |
+| `source_type` | Optional source filter: `source_code`, `documentation`, `database_schema`, or `configuration` | none |
+| `item_type` | Optional exact item type filter | none |
+| `path_prefix` | Optional repository-relative path prefix filter | none |
+
+Current extractors:
+
+| Source type | Extracted item types |
+| --- | --- |
+| `source_code` | `source_file`, `symbol`, `import` |
+| `documentation` | `document`, `document_section` |
+| `database_schema` | `prisma_schema`, `prisma_model`, `prisma_enum` |
+| `configuration` | `package_manifest`, `python_project`, `python_requirements`, `typescript_config`, `dockerfile`, `compose_config` |
+
+Example response:
+
+```json
+{
+  "knowledge_items": [
+    {
+      "id": "00000000-0000-0000-0000-000000000006",
+      "repository_id": "00000000-0000-0000-0000-000000000002",
+      "repository_file_id": "00000000-0000-0000-0000-000000000004",
+      "path": "README.md",
+      "source_type": "documentation",
+      "item_type": "document",
+      "name": "Project Guide",
+      "extractor": "documentation",
+      "data": {
+        "title": "Project Guide",
+        "heading_count": 4,
+        "link_count": 2,
+        "code_block_count": 1
+      },
+      "extracted_at": "2026-07-18T00:00:00Z",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "page": 1,
+  "page_size": 100,
+  "has_next_page": false
+}
+```
+
+This knowledge layer intentionally stops before embeddings, vector search, graph generation, and AI orchestration.
+
 ### Read repository inventory statistics
 
 ```http
@@ -246,4 +381,4 @@ GET /api/v1/ready
 | `502` | GitHub API failure |
 | `503` | Indexing task could not be enqueued |
 
-Code parsing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
+Embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
