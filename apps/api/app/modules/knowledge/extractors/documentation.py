@@ -92,7 +92,8 @@ class DocumentationKnowledgeExtractor:
         metadata: dict[str, str] = {}
         for index, line in enumerate(lines[1:], start=1):
             if line.strip() == "---":
-                return metadata, "\n".join(lines[index + 1 :])
+                # Preserve source line positions after front matter is removed.
+                return metadata, "\n" * (index + 1) + "\n".join(lines[index + 1 :])
             if ":" in line:
                 key, value = line.split(":", 1)
                 metadata[key.strip()] = value.strip().strip('"').strip("'")
@@ -136,7 +137,9 @@ class DocumentationKnowledgeExtractor:
             if not match:
                 continue
             if open_block is None:
-                open_block = {"language": match.group(1) or None, "start_line": line_number}
+                fence_info = (match.group(1) or "").split(maxsplit=1)
+                language = fence_info[0] if fence_info else None
+                open_block = {"language": language, "start_line": line_number}
             else:
                 open_block["end_line"] = line_number
                 blocks.append(open_block)

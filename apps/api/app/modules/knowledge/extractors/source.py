@@ -37,6 +37,9 @@ class SourceCodeKnowledgeExtractor:
                         "error_count": parsed_file.error_count,
                         "symbol_count": parsed_file.symbol_count,
                         "import_count": parsed_file.import_count,
+                        "exports": [
+                            symbol["name"] for symbol in parsed_file.symbols if symbol.get("is_exported")
+                        ],
                     },
                     extracted_at=parsed_file.parsed_at,
                 )

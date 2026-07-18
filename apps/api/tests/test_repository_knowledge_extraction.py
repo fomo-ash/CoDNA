@@ -96,6 +96,18 @@ def test_documentation_extractor_extracts_markdown_structure(tmp_path) -> None:
     assert [section.name for section in sections] == ["Overview", "Install"]
 
 
+def test_documentation_extractor_handles_unlabelled_code_fences(tmp_path) -> None:
+    readme = make_file("README.md", "md", "Markdown")
+    (tmp_path / "README.md").write_text("# Guide\n```\nplain text\n```\n", encoding="utf-8")
+
+    items = DocumentationKnowledgeExtractor().extract(
+        KnowledgeExtractionContext(REPOSITORY_ID, tmp_path, [readme])
+    )
+
+    document = next(item for item in items if item.item_type == "document")
+    assert document.data["code_blocks"] == [{"language": None, "start_line": 2, "end_line": 4}]
+
+
 def test_prisma_extractor_extracts_models_relations_enums_and_constraints(tmp_path) -> None:
     prisma_dir = tmp_path / "prisma"
     prisma_dir.mkdir()

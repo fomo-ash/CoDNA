@@ -130,7 +130,7 @@ POST /api/v1/repositories/{repository_id}/index
 ```
 
 This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
-The current task shallow-clones the repository into the worker workspace, discovers source file metadata, parses supported source files with Tree-sitter, extracts structured repository knowledge, records clone/index metadata, and completes successfully.
+The current task shallow-clones the repository into the worker workspace, discovers source file metadata, parses supported source files with Tree-sitter, extracts structured repository knowledge, builds semantic chunks from that persisted knowledge, records clone/index metadata, and completes successfully.
 It does not generate embeddings, build a graph, or call AI yet.
 
 Example response:
@@ -324,7 +324,30 @@ Example response:
 }
 ```
 
-This knowledge layer intentionally stops before embeddings, vector search, graph generation, and AI orchestration.
+### List repository chunks
+
+```http
+GET /api/v1/repositories/{repository_id}/chunks?page=1&page_size=100
+```
+
+Chunks are semantic documents built after knowledge extraction. Chunk building consumes persisted knowledge items and stored line ranges; it does not execute Tree-sitter again.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `page` | Positive page number | `1` |
+| `page_size` | `1` to `500` chunks per page | `100` |
+| `source_type` | Optional source filter | none |
+| `chunk_type` | Optional chunk filter: `class`, `function`, `source_file`, `documentation_section`, `prisma_model`, or `configuration` | none |
+
+### Read one chunk
+
+```http
+GET /api/v1/chunks/{chunk_id}
+```
+
+Both chunk endpoints are owner-scoped. A chunk response contains its source content, line range, language, stable identifier, and structured metadata for later embedding and retrieval stages. Function and class chunks include deterministic static-analysis facts and repository-local relationships when they can be resolved; unresolved relationship categories are empty lists.
+
+The knowledge and chunk layers intentionally stop before embeddings, vector search, graph generation, and AI orchestration.
 
 ### Read repository inventory statistics
 

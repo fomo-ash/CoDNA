@@ -4,7 +4,7 @@
 
 This document describes the current repository indexing pipeline.
 
-Indexing is asynchronous. The API creates a durable job, publishes work to Redis, and returns immediately. A Celery worker then clones the repository, discovers files, parses supported source files, extracts structured repository knowledge, and persists the results for later chunking, embeddings, search, and AI features.
+Indexing is asynchronous. The API creates a durable job, publishes work to Redis, and returns immediately. A Celery worker then clones the repository, discovers files, parses supported source files, extracts structured repository knowledge, builds semantic chunks, and persists the results for later embeddings, search, and AI features.
 
 This milestone intentionally stops before embeddings, vector search, graph generation, and AI orchestration.
 
@@ -21,7 +21,8 @@ Authenticated client
   -> worker discovers file inventory
   -> worker parses supported source files with Tree-sitter
   -> worker extracts structured knowledge
-  -> worker persists inventory, parse results, and knowledge items
+  -> worker builds semantic chunks from persisted knowledge and stored file ranges
+  -> worker persists inventory, parse results, knowledge items, and chunks
   -> worker marks job completed and repository ready
 ```
 
@@ -95,6 +96,27 @@ Markdown extraction captures titles, headings, sections, links, code blocks, and
 Prisma extraction captures models, fields, relations, enums, indexes, and constraints.
 
 Configuration extraction captures dependencies, scripts, package manager signals, frameworks, runtime hints, build commands, Docker commands, Compose services, Python project metadata, and requirements.
+
+### 5. Semantic Chunk Building
+
+Chunk building runs after knowledge persistence. It consumes `repository_knowledge_items` and uses the stored path and line metadata to slice the cloned file content. It never invokes Tree-sitter or any other parser.
+
+Current chunk types:
+
+| Source type | Chunk types |
+| --- | --- |
+| `source_code` | `class`, `function`, `source_file` for small symbol-free files |
+| `documentation` | `documentation_section` |
+| `database_schema` | `prisma_model` |
+| `configuration` | `configuration` |
+
+Class chunks include their imports, used imports, constructor, methods, fields, decorators, inheritance, and implemented interfaces. Function chunks include signatures, parameters, return types, decorators, visibility, local variables, calls, references, and used imports. Source symbols have stable IDs such as `environment.py::StudentLifeEnv::step`.
+
+Each chunk also has deterministic repository-aware metadata: its module, repository-relative path, source range, language, stable ID, and a `relationships` object. The builder resolves repository-local imports, calls, references, `called_by`, and `imported_by` links when they are unambiguous. Unresolved relationship categories remain empty lists.
+
+Source chunks expose `file_imports` for the complete file import set and `used_imports` for the imports referenced by that specific function, class, constants group, or types group. Legacy `imports` remains on file-level chunks only. The parser also records explicit exports (including Python `__all__` when statically declared), so downstream graph work does not need to parse source again.
+
+Markdown section chunks record outbound links, code blocks, table/image presence, and section depth. Configuration chunks additionally identify framework, runtime, package manager, build tool, testing framework, linting tools, and formatter when those signals are present in the extracted manifest data.
 
 ## Key Endpoints
 
@@ -170,6 +192,28 @@ GET /api/v1/repositories/{repository_id}/knowledge?source_type=database_schema
 GET /api/v1/repositories/{repository_id}/knowledge?source_type=configuration
 GET /api/v1/repositories/{repository_id}/knowledge?item_type=symbol
 GET /api/v1/repositories/{repository_id}/knowledge?path_prefix=src/
+```
+
+### List semantic chunks
+
+```http
+GET /api/v1/repositories/{repository_id}/chunks?page=1&page_size=100
+Authorization: Bearer <codedna-jwt>
+```
+
+Useful filters:
+
+```http
+GET /api/v1/repositories/{repository_id}/chunks?source_type=source_code
+GET /api/v1/repositories/{repository_id}/chunks?chunk_type=class
+GET /api/v1/repositories/{repository_id}/chunks?chunk_type=documentation_section
+```
+
+### Read one chunk
+
+```http
+GET /api/v1/chunks/{chunk_id}
+Authorization: Bearer <codedna-jwt>
 ```
 
 ## Docker Verification
@@ -256,6 +300,9 @@ curl -s "$API/repositories/REPOSITORY_ID/parse-results?page_size=20" \
 
 curl -s "$API/repositories/REPOSITORY_ID/knowledge?page_size=20" \
   -H "Authorization: Bearer $TOKEN"
+
+curl -s "$API/repositories/REPOSITORY_ID/chunks?page_size=20" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 Recommended coverage:
@@ -271,6 +318,7 @@ Expected result:
 - Inventory rows exist.
 - Parse rows exist for all inventoried files.
 - Knowledge items exist for source code and any available docs/schema/config files.
+- Semantic chunks exist for source code and any available docs/schema/config files.
 - Unsupported files are expected for formats without a parser, such as CSS, SVG, HTML, lockfiles, media, fonts, and some config files.
 
 ## Troubleshooting
@@ -283,16 +331,16 @@ Check whether the migration already applied:
 docker compose exec -T postgres psql -U postgres -d codna -c "select * from alembic_version;"
 ```
 
-The current repository knowledge milestone expects:
+The current semantic chunk milestone expects:
 
 ```text
-20260718_000010
+20260718_000011
 ```
 
 Also confirm the new tables exist:
 
 ```bash
-docker compose exec -T postgres psql -U postgres -d codna -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('repository_file_parses','repository_knowledge_items') order by table_name;"
+docker compose exec -T postgres psql -U postgres -d codna -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('repository_file_parses','repository_knowledge_items','repository_chunks') order by table_name;"
 ```
 
 If the DB is already at the latest revision and the one-off migrate container is still running with no new logs, stop only that one-off container and continue.
@@ -344,19 +392,19 @@ This milestone is complete when:
 - Worker persists repository inventory and statistics.
 - Worker persists parse rows for discovered files.
 - Worker extracts source code, documentation, database schema, and configuration knowledge.
+- Worker builds semantic chunks from persisted knowledge without rerunning Tree-sitter.
 - Job status moves to `completed` on success and repository status moves to `ready`.
 - Failed worker execution records a safe error summary and repository status moves to `failed`.
-- Inventory, parse result, and knowledge endpoints are owner-scoped.
+- Inventory, parse result, knowledge, and chunk endpoints are owner-scoped.
 - Focused backend tests pass.
 
 ## Next Milestones
 
 Do next:
 
-1. Add chunking on top of the structured knowledge layer.
-2. Add embeddings for chunks and store vectors in PostgreSQL/pgvector.
-3. Add retrieval APIs over chunks and metadata filters.
-4. Add AI answer orchestration using retrieved chunks as context.
-5. Add graph generation after stable entities and relationships are available.
+1. Add embeddings for chunks and store vectors in PostgreSQL/pgvector.
+2. Add retrieval APIs over chunks and metadata filters.
+3. Add AI answer orchestration using retrieved chunks as context.
+4. Add graph generation after stable entities and relationships are available.
 
 Do not skip straight to AI orchestration. The retrieval layer needs stable chunks and metadata first.

@@ -378,6 +378,13 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
             persisted["knowledge_repository_id"] = repository_id
             persisted["knowledge_result"] = extraction_result
 
+    class FakeChunkService:
+        async def rebuild_repository_chunks(self, session, repository_id, repository_path):
+            del session
+            persisted["chunk_repository_id"] = repository_id
+            persisted["chunk_repository_path"] = repository_path
+            return 0
+
     async def fake_to_thread(function, *args):
         return function(*args)
 
@@ -410,6 +417,7 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     monkeypatch.setattr(tasks, "RepositoryFileServiceImpl", FakeRepositoryFileService)
     monkeypatch.setattr(tasks, "RepositoryParserServiceImpl", FakeParserService)
     monkeypatch.setattr(tasks, "RepositoryKnowledgeServiceImpl", FakeKnowledgeService)
+    monkeypatch.setattr(tasks, "RepositoryChunkServiceImpl", FakeChunkService)
     monkeypatch.setattr(
         tasks,
         "_parse_repository_in_subprocess",
@@ -439,6 +447,8 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     assert persisted["knowledge_repository_id"] == REPOSITORY_ID
     assert persisted["knowledge_context"].repository_id == REPOSITORY_ID
     assert persisted["knowledge_context"].repository_path == tmp_path
+    assert persisted["chunk_repository_id"] == REPOSITORY_ID
+    assert persisted["chunk_repository_path"] == tmp_path
 
 
 def test_worker_failure_path_marks_job_and_repository_failed(monkeypatch, tmp_path) -> None:

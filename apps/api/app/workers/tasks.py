@@ -20,6 +20,7 @@ from app.db.models.repository_file import RepositoryFile
 from app.db.models.user import User
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.service import RepositoryFileServiceImpl
+from app.modules.chunks.service import RepositoryChunkServiceImpl
 from app.modules.jobs.enums import JobStatus
 from app.modules.knowledge.service import KnowledgeExtractionContext, RepositoryKnowledgeServiceImpl
 from app.modules.parsing.results import RepositoryParseResult, parse_result_from_dict
@@ -135,6 +136,18 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
                 session,
                 repository.id,
                 knowledge_result,
+            )
+            chunk_service = RepositoryChunkServiceImpl()
+            chunk_count = await chunk_service.rebuild_repository_chunks(
+                session,
+                repository.id,
+                clone_result.clone_path,
+            )
+            logger.info(
+                "repository semantic chunking completed job_id=%s repository_id=%s chunks=%s",
+                job_id,
+                repository_id,
+                chunk_count,
             )
 
             job.status = JobStatus.COMPLETED

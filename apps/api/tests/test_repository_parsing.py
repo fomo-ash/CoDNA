@@ -51,6 +51,9 @@ def test_tree_sitter_parser_extracts_python_symbols_and_imports(tmp_path) -> Non
     assert parsed_file.error_count == 0
     assert [item["name"] for item in parsed_file.symbols] == ["Greeter", "hello", "build"]
     assert parsed_file.symbols[0]["kind"] == "class"
+    assert parsed_file.symbols[1]["parent_symbol"] == "Greeter"
+    assert parsed_file.symbols[1]["parameters"] == ["self"]
+    assert parsed_file.symbols[1]["stable_symbol_id"] == "src/app.py::Greeter::hello"
     assert parsed_file.imports == [
         {
             "statement": "import os",
@@ -107,6 +110,43 @@ def test_tree_sitter_parser_extracts_typescript_types_enums_and_constants(tmp_pa
         "enum",
         "constant",
     ]
+
+
+def test_tree_sitter_parser_extracts_function_static_analysis_once(tmp_path) -> None:
+    (tmp_path / "worker.py").write_text(
+        "from helpers import run\n"
+        "TASKS = []\n\n"
+        "def execute(limit: int) -> int:\n"
+        "    result = run(TASKS)\n"
+        "    return result\n",
+        encoding="utf-8",
+    )
+
+    parsed_file = RepositoryParserServiceImpl().parse_repository(
+        tmp_path, [make_file("worker.py", "py", "Python")]
+    ).files[0]
+    execute = next(symbol for symbol in parsed_file.symbols if symbol["name"] == "execute")
+
+    assert execute["calls"] == ["run"]
+    assert execute["local_variables"] == ["result"]
+    assert "TASKS" in execute["references"]
+    assert execute["return_type"] == "int"
+
+
+def test_tree_sitter_parser_extracts_exports_and_honors_python_all(tmp_path) -> None:
+    (tmp_path / "exports.py").write_text(
+        '__all__ = ["visible"]\n\n'
+        "def visible():\n    return 1\n\n"
+        "def internal():\n    return 2\n",
+        encoding="utf-8",
+    )
+
+    symbols = RepositoryParserServiceImpl().parse_repository(
+        tmp_path, [make_file("exports.py", "py", "Python")]
+    ).files[0].symbols
+
+    assert next(symbol for symbol in symbols if symbol["name"] == "visible")["is_exported"] is True
+    assert next(symbol for symbol in symbols if symbol["name"] == "internal")["is_exported"] is False
 
 
 def test_tree_sitter_parser_records_syntax_errors_without_failing_repository(tmp_path) -> None:

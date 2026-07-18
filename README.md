@@ -22,6 +22,7 @@ Instead of simply answering *what* the code does, CoDNA explains *why* it exists
 - ✅ Repository cloning scaffold with worker-managed local workspace
 - ✅ Repository file inventory and Tree-sitter parse metadata for Python, JavaScript, TypeScript, and TSX
 - ✅ Structured repository knowledge extraction for source code, Markdown docs, Prisma schema, and project configuration
+- ✅ Repository-aware semantic chunks with deterministic symbol, import, call, and reference relationships
 
 ## Tech Stack
 
