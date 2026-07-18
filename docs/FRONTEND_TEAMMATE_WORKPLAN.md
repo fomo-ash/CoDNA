@@ -245,7 +245,8 @@ UI should show:
 
 - Imported repository name.
 - Status.
-- Last indexed time.
+- Last cloned time.
+- Last indexed time when available.
 - Button to start indexing.
 - Link to repository detail screen.
 
@@ -260,7 +261,7 @@ cloning
 archived
 ```
 
-Only `registered`, `indexing`, `ready`, and `failed` are expected right now.
+Only `registered`, `cloning`, `ready`, and `failed` are expected right now.
 
 ### 6. Indexing Job UI
 

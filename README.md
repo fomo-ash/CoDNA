@@ -19,6 +19,7 @@ Instead of simply answering *what* the code does, CoDNA explains *why* it exists
 - ✅ GitHub OAuth authentication with backend-only token storage
 - ✅ GitHub repository discovery and owner-scoped import
 - ✅ Celery/Redis asynchronous indexing scaffold with persisted job status
+- ✅ Repository cloning scaffold with worker-managed local workspace
 
 ## Tech Stack
 
@@ -71,5 +72,6 @@ Useful docs:
 - [API reference](docs/API.md)
 - [Beginner backend verification guide](docs/BACKEND_VERIFICATION_GUIDE.md)
 - [Frontend teammate workplan](docs/FRONTEND_TEAMMATE_WORKPLAN.md)
+- [AI demo cost policy](docs/AI_COST_POLICY.md)
 - [Repository registration details](docs/REPOSITORY_REGISTRATION.md)
 - [Async indexing architecture](docs/ASYNC_INDEXING.md)

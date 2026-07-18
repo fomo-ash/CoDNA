@@ -41,6 +41,7 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
+      REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
       LOG_LEVEL: INFO
     ports:
       - "${API_PORT:-8000}:8000"
@@ -66,6 +67,7 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
+      REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
       LOG_LEVEL: INFO
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -86,7 +88,10 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
+      REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
       LOG_LEVEL: INFO
+    volumes:
+      - repository_data:/var/lib/codna/repositories
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,3 +114,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  repository_data:

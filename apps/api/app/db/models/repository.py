@@ -28,6 +28,7 @@ class Repository(TimestampedUUIDModel):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     default_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     clone_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    clone_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     visibility: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[RepositoryStatus] = mapped_column(
         Enum(
@@ -38,4 +39,5 @@ class Repository(TimestampedUUIDModel):
         nullable=False,
         index=True,
     )
+    last_cloned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

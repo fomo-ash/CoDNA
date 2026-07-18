@@ -36,6 +36,7 @@ class RepositoryRead(RepositoryBase):
     id: UUID
     owner_id: UUID | None
     github_id: str | None
+    last_cloned_at: datetime | None
     last_indexed_at: datetime | None
     created_at: datetime
     updated_at: datetime

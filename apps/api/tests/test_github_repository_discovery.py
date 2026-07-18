@@ -49,6 +49,7 @@ def make_repository_read() -> RepositoryRead:
         clone_url="https://github.com/octo/repo.git",
         visibility="private",
         status=RepositoryStatus.REGISTERED,
+        last_cloned_at=None,
         last_indexed_at=None,
         created_at=timestamp,
         updated_at=timestamp,

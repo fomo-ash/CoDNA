@@ -4,9 +4,10 @@
 
 This document describes the asynchronous indexing infrastructure milestone after GitHub repository discovery and import.
 
-The goal is to establish the asynchronous execution framework before adding repository cloning, parsing, embeddings, graph generation, or AI functionality.
+The goal is to establish the asynchronous execution framework before adding parsing, embeddings, graph generation, or AI functionality.
 
-This milestone is implemented as infrastructure only. The worker task is a stub that updates repository and job status, simulates work, and exits successfully.
+This milestone is implemented as infrastructure only.
+The worker task now performs a shallow Git clone into a controlled local workspace, updates repository and job status, and exits successfully.
 
 ## Target Flow
 
@@ -23,7 +24,7 @@ Create Job record with status=queued
 Publish Celery task to Redis broker
         |
         v
-Worker executes stub task
+Worker executes clone task
         |
         v
 Update repository and job statuses
@@ -40,7 +41,7 @@ Redis is the Celery broker. PostgreSQL remains the source of truth for repositor
 
 The FastAPI process handles HTTP requests only. It authenticates the user, validates the repository ID, creates the database job record, publishes the task, and returns the job reference.
 
-The API process does not perform the simulated work. It must remain responsive while workers process jobs in the background.
+The API process does not clone repositories. It must remain responsive while workers process jobs in the background.
 
 ### PostgreSQL
 
@@ -81,7 +82,8 @@ The Celery application should not import the FastAPI application object. This pr
 
 The worker is a separate process from FastAPI. It listens to the Redis broker and executes registered tasks.
 
-The worker will eventually perform expensive operations such as cloning and parsing. In this milestone it executes only a stub task so the queue, persistence, and status flow can be validated safely.
+The worker performs repository cloning in this milestone.
+It does not parse, embed, graph, or analyze source code yet.
 
 ### Job service
 
@@ -97,7 +99,7 @@ The service is responsible for:
 - Setting timestamps consistently.
 - Clearing or preserving error information according to the transition.
 
-This boundary allows the stub task to be replaced later without changing the public API.
+This boundary allows the clone-first task to be extended later without changing the public API.
 
 ## Detailed Request Lifecycle
 
@@ -125,11 +127,12 @@ When the worker receives the task:
 2. It loads the job by job ID.
 3. It verifies that the job references the expected repository.
 4. It marks the job `running` and records `started_at`.
-5. It changes the repository status to `indexing`.
-6. It performs the stub simulation.
+5. It changes the repository status to `cloning`.
+6. It shallow-clones the repository into the configured worker workspace.
 7. It marks the job `completed` and records `completed_at`.
 8. It changes the repository status to `ready`.
-9. It commits the final transaction and closes the database session.
+9. It stores internal clone metadata.
+10. It commits the final transaction and closes the database session.
 
 If an exception occurs:
 
@@ -200,7 +203,7 @@ registered -> indexing -> ready
                      -> failed
 ```
 
-`cloning` exists for the future cloning stage but is not used by the stub task. The task should move directly from `registered` to `indexing`, then to `ready` or `failed`.
+The task moves from `registered` to `cloning`, then to `ready` or `failed`.
 
 `archived` is not changed by the indexing task. An archived repository should be rejected or handled by an explicit future policy rather than silently reactivated.
 
@@ -244,11 +247,12 @@ The worker and API need the same broker configuration:
 
 ```text
 REDIS_URL=redis://redis:6379/0
+REPOSITORY_WORKSPACE_PATH=/var/lib/codna/repositories
 ```
 
 The value must continue to come from `Settings`. The worker should receive it through Docker Compose environment injection in the same way as the API.
 
-No new secret is required for the stub task.
+No new secret is required for public repository cloning. Private repository cloning depends on the backend-only GitHub token already stored from OAuth and on the scopes granted by the GitHub OAuth app.
 
 ## Implemented API Contract
 
@@ -321,7 +325,7 @@ If Redis is unavailable while creating a job:
 
 ### Worker failure
 
-If the stub task raises:
+If the worker task raises:
 
 - Persist `failed` in the job record.
 - Persist `failed` in the repository record.
@@ -340,14 +344,12 @@ The recommended MVP policy is to return the active job so repeated frontend requ
 
 ### Concurrent requests
 
-Two simultaneous start requests must not create duplicate active jobs for the same repository. This requires either a database constraint for active jobs or a transaction-safe service check. The chosen approach should be implemented before real indexing work is added.
+Two simultaneous start requests must not create duplicate active jobs for the same repository. This requires either a database constraint for active jobs or a transaction-safe service check.
 
 ## What This Milestone Does Not Do
 
 The worker must not yet:
 
-- Clone a repository.
-- Use the GitHub access token for Git operations.
 - Synchronize branches, commits, issues, or pull requests.
 - Walk the repository filesystem.
 - Parse code with Tree-sitter.
@@ -357,7 +359,7 @@ The worker must not yet:
 - Create graph nodes or edges.
 - Generate AI answers.
 
-The stub exists only to prove that a request can move through API, PostgreSQL, Redis, Celery, worker, and status polling successfully.
+The clone-first task proves that a request can move through API, PostgreSQL, Redis, Celery, worker, Git, local workspace storage, and status polling successfully.
 
 ## Implementation Order
 
@@ -417,7 +419,7 @@ The job service owns database operations:
 - Mark a job failed with a safe error message.
 - Load a job scoped to the authenticated repository owner.
 
-The service should expose stable interfaces so the stub task can later be replaced by the real indexing pipeline.
+The service should expose stable interfaces so the clone-first task can later be extended into the real indexing pipeline.
 
 ### 5. Job router and status API
 
@@ -439,20 +441,27 @@ The worker container should start Celery using the shared application module, fo
 celery -A app.workers.celery_app.celery_app worker --loglevel=INFO
 ```
 
+Current command:
+
+```bash
+celery -A app.core.celery:celery_app worker --loglevel=INFO
+```
+
 The worker must depend on Redis and PostgreSQL being available. Database access from a task must use a short-lived async session and must always close the session.
 
-### 7. Stub background task
+### 7. Clone-first background task
 
-The first task deliberately simulates work only:
+The first task deliberately performs only the repository cloning stage:
 
 1. Load the job and repository.
 2. Mark the job `running`.
-3. Set the repository status to `indexing`.
-4. Simulate a short delay.
+3. Set the repository status to `cloning`.
+4. Shallow-clone the repository into the configured workspace.
 5. Mark the job `completed`.
 6. Set the repository status to `ready`.
+7. Store internal clone path and `last_cloned_at`.
 
-The task must not clone repositories, call GitHub synchronization APIs, parse files, generate embeddings, or build graph data.
+The task must not call GitHub synchronization APIs, parse files, generate embeddings, or build graph data.
 
 ## Public API Contract
 
@@ -545,7 +554,7 @@ The expected sequence is:
 queued -> running -> completed
 ```
 
-The repository should end in `ready` after the stub task completes.
+The repository should end in `ready` after the clone-first task completes.
 
 ### 5. Verify failure and ownership behavior
 
@@ -567,14 +576,14 @@ The milestone should include tests for:
 - Job status lookup.
 - Unauthorized job access.
 - Missing repository handling.
-- Stub task success transitions.
-- Stub task failure transitions.
+- Clone task success transitions.
+- Clone task failure transitions.
 
 The tests should mock Celery enqueueing and use isolated database/service boundaries. They should not require a live GitHub API.
 
 ## Future Replacement
 
-The public onboarding contract should remain unchanged when the stub is replaced:
+The public onboarding contract should remain unchanged when clone-first indexing is extended:
 
 ```text
 Repository onboarding
@@ -611,4 +620,4 @@ The milestone is complete only when all of the following are true:
 - Duplicate active indexing requests follow the documented policy.
 - API, worker, Redis, PostgreSQL, and migration containers work together in Docker.
 - Tests cover producer behavior, task transitions, failure handling, and ownership checks.
-- Replacing the stub task does not require changing the public API contract.
+- Extending the clone-first task does not require changing the public API contract.

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     log_level: str
     database_url: str
     redis_url: str
+    repository_workspace_path: str
     openai_api_key: str | None = None
     github_client_id: str | None = None
     github_client_secret: str | None = None

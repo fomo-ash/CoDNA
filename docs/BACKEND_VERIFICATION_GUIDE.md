@@ -19,8 +19,8 @@ The current backend supports:
 - Asynchronous indexing scaffold using Celery and Redis.
 - Job status tracking in PostgreSQL.
 
-The current backend does not yet perform real repository cloning, parsing, embeddings, graph generation, or AI analysis.
-The indexing task is intentionally a stub.
+The current backend performs shallow repository cloning through a worker.
+It does not yet perform parsing, embeddings, graph generation, or AI analysis.
 
 ## Required Local Setup
 
@@ -364,6 +364,7 @@ Expected response:
   "id": "2353ab83-0db6-49e4-8503-83fd1fc0bfef",
   "owner_id": "13834d99-e025-48fe-a640-067f600bb9a2",
   "github_id": "123456789",
+  "last_cloned_at": null,
   "last_indexed_at": null,
   "created_at": "2026-07-17T21:29:03.856134Z",
   "updated_at": "2026-07-17T21:29:03.856134Z"
@@ -552,14 +553,16 @@ Expected result includes:
 ```json
 {
   "status": "ready",
-  "last_indexed_at": "2026-07-17T21:20:41.624748Z"
+  "last_cloned_at": "2026-07-18T21:20:41.624748Z",
+  "last_indexed_at": null
 }
 ```
 
 What this proves:
 
-- The stub indexing task updated the repository lifecycle.
-- Future real indexing can replace the stub task without changing the API contract.
+- The worker cloned the repository.
+- The worker updated the repository lifecycle.
+- Future parsing and indexing can extend the worker task without changing the API contract.
 
 ## Step 13: Check Worker Logs
 
@@ -590,7 +593,7 @@ Repositories:
 
 ```bash
 docker compose exec postgres psql -U postgres -d codna -c \
-  "select id, owner_id, full_name, status, last_indexed_at from repositories order by created_at desc limit 5;"
+  "select id, owner_id, full_name, status, last_cloned_at, last_indexed_at from repositories order by created_at desc limit 5;"
 ```
 
 Jobs:
@@ -850,11 +853,10 @@ Return response immediately
 
 A worker is a separate process that performs background tasks.
 
-In this project, the worker currently runs a stub indexing task.
+In this project, the worker currently runs a clone-first indexing task.
 
-Later, the worker will handle:
+Later, the worker will also handle:
 
-- Repository cloning.
 - Parsing source code.
 - Creating chunks.
 - Creating embeddings.
@@ -905,8 +907,8 @@ Indexing means preparing a repository so CodeDNA can search, understand, and ans
 
 Current milestone:
 
-- Indexing is a stub.
-- It only tests background infrastructure.
+- Indexing starts by cloning the repository.
+- It still does not parse or analyze files.
 
 Future milestone:
 
@@ -917,20 +919,20 @@ Future milestone:
 - Store embeddings.
 - Build graph records.
 
-### Stub
+### Scaffold
 
-A stub is placeholder logic that proves the wiring works before real logic is added.
+A scaffold is early infrastructure that proves the wiring works before full product logic is added.
 
-Current stub task:
+Current clone-first task:
 
 ```text
 mark job running
-wait briefly
+clone repository
 mark job completed
 mark repository ready
 ```
 
-This proves the async architecture works before adding expensive indexing logic.
+This proves the async architecture works before adding parsing, embeddings, graph generation, and AI logic.
 
 ## Common Problems and Fixes
 
@@ -1102,13 +1104,12 @@ If every step passes, the current backend foundation is working:
 - Celery can enqueue and execute background work.
 - Redis works as the broker.
 - Job status is persisted and readable.
-- The public API is ready for the real indexing milestone.
+- The public API is ready for the parsing and indexing milestone.
 
 ## What This Does Not Prove Yet
 
 This guide does not verify:
 
-- Repository cloning.
 - GitHub sync.
 - Tree-sitter parsing.
 - Semantic chunking.

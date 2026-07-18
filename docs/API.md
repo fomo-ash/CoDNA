@@ -128,7 +128,8 @@ POST /api/v1/repositories/{repository_id}/index
 ```
 
 This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
-The current task is a stub: it updates job and repository status, simulates work, and completes successfully.
+The current task shallow-clones the repository into the worker workspace, records clone metadata, and completes successfully.
+It does not parse files, generate embeddings, build a graph, or call AI yet.
 
 Example response:
 
@@ -171,4 +172,4 @@ GET /api/v1/ready
 | `502` | GitHub API failure |
 | `503` | Indexing task could not be enqueued |
 
-Repository cloning, real indexing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
+File parsing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
