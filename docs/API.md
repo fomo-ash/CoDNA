@@ -8,6 +8,8 @@ All application routes are under `/api/v1`.
 
 For a full manual verification sequence with beginner explanations, see [Backend Verification Guide](BACKEND_VERIFICATION_GUIDE.md).
 
+For repository inventory implementation details and troubleshooting, see [Repository Inventory and File Discovery](REPOSITORY_INVENTORY.md).
+
 ## Authentication
 
 Start GitHub OAuth:
@@ -128,8 +130,8 @@ POST /api/v1/repositories/{repository_id}/index
 ```
 
 This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
-The current task shallow-clones the repository into the worker workspace, records clone metadata, and completes successfully.
-It does not parse files, generate embeddings, build a graph, or call AI yet.
+The current task shallow-clones the repository into the worker workspace, discovers source file metadata, records clone/index metadata, and completes successfully.
+It does not parse code, generate embeddings, build a graph, or call AI yet.
 
 Example response:
 
@@ -142,6 +144,78 @@ Example response:
 ```
 
 If the repository already has a queued or running index job, the API returns that existing job instead of enqueueing a duplicate.
+
+### List discovered repository files
+
+```http
+GET /api/v1/repositories/{repository_id}/files?page=1&page_size=100
+```
+
+This returns file metadata discovered by the background indexing job. The endpoint is scoped to the authenticated owner and does not expose local clone paths or file contents.
+
+Query parameters:
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `page` | Positive page number | `1` |
+| `page_size` | `1` to `500` files per page | `100` |
+| `language` | Optional exact detected language filter | none |
+| `extension` | Optional extension filter, with or without `.` | none |
+| `path_prefix` | Optional repository-relative path prefix filter | none |
+
+Example response:
+
+```json
+{
+  "files": [
+    {
+      "id": "00000000-0000-0000-0000-000000000004",
+      "repository_id": "00000000-0000-0000-0000-000000000002",
+      "path": "src/app.py",
+      "filename": "app.py",
+      "extension": "py",
+      "language": "Python",
+      "size_bytes": 1234,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "is_binary": false,
+      "discovered_at": "2026-07-18T00:00:00Z",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "page": 1,
+  "page_size": 100,
+  "has_next_page": false
+}
+```
+
+Known binary asset extensions, files larger than 10 MB, secret-like env files, dependency directories, build output, editor directories, and VCS directories are skipped during discovery. Other binary files are inventoried with `is_binary=true` and no detected source language.
+
+### Read repository inventory statistics
+
+```http
+GET /api/v1/repositories/{repository_id}/stats
+```
+
+This returns the persisted statistics from the latest successful inventory scan.
+
+Example response:
+
+```json
+{
+  "repository_id": "00000000-0000-0000-0000-000000000002",
+  "total_files": 1483,
+  "source_files": 1094,
+  "binary_files": 82,
+  "total_size_bytes": 18734562,
+  "languages": {
+    "Python": 512,
+    "TypeScript": 274,
+    "Markdown": 36
+  },
+  "last_scan_at": "2026-07-18T00:00:00Z"
+}
+```
 
 ## Jobs
 
@@ -172,4 +246,4 @@ GET /api/v1/ready
 | `502` | GitHub API failure |
 | `503` | Indexing task could not be enqueued |
 
-File parsing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
+Code parsing, embeddings, graph generation, and AI orchestration are intentionally outside this milestone.

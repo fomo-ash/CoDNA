@@ -42,6 +42,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
       REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
+      REPOSITORY_FILE_MAX_BYTES: 10485760
+      REPOSITORY_FILE_DISCOVERY_LIMIT: 5000
       LOG_LEVEL: INFO
     ports:
       - "${API_PORT:-8000}:8000"
@@ -68,6 +70,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
       REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
+      REPOSITORY_FILE_MAX_BYTES: 10485760
+      REPOSITORY_FILE_DISCOVERY_LIMIT: 5000
       LOG_LEVEL: INFO
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -89,6 +93,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/codna
       REDIS_URL: redis://redis:6379/0
       REPOSITORY_WORKSPACE_PATH: /var/lib/codna/repositories
+      REPOSITORY_FILE_MAX_BYTES: 10485760
+      REPOSITORY_FILE_DISCOVERY_LIMIT: 5000
       LOG_LEVEL: INFO
     volumes:
       - repository_data:/var/lib/codna/repositories

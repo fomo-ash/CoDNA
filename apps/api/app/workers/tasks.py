@@ -12,6 +12,8 @@ from app.core.config import get_settings
 from app.db.models.job import Job
 from app.db.models.repository import Repository
 from app.db.models.user import User
+from app.modules.files.discovery import RepositoryFileDiscoveryService
+from app.modules.files.service import RepositoryFileServiceImpl
 from app.modules.jobs.enums import JobStatus
 from app.modules.repositories.clone import RepositoryCloneService, RepositoryCloneTarget
 from app.modules.repositories.enums import RepositoryStatus
@@ -50,12 +52,35 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
         )
 
         async with worker_session() as session:
+            _job, repository, _user = await _get_job_and_repository(session, job_id, repository_id)
+            repository.status = RepositoryStatus.INDEXING
+            repository.clone_path = str(clone_result.clone_path)
+            repository.last_cloned_at = clone_result.cloned_at
+            await session.commit()
+
+        file_discovery_service = RepositoryFileDiscoveryService(
+            max_file_size_bytes=settings.repository_file_max_bytes,
+            max_files=settings.repository_file_discovery_limit,
+        )
+        discovery_result = await asyncio.to_thread(
+            file_discovery_service.discover,
+            clone_result.clone_path,
+        )
+
+        async with worker_session() as session:
             job, repository, _user = await _get_job_and_repository(session, job_id, repository_id)
             job.status = JobStatus.COMPLETED
-            job.completed_at = datetime.now(UTC)
+            completed_at = datetime.now(UTC)
+            job.completed_at = completed_at
             repository.status = RepositoryStatus.READY
             repository.clone_path = str(clone_result.clone_path)
             repository.last_cloned_at = clone_result.cloned_at
+            repository.last_indexed_at = completed_at
+            await RepositoryFileServiceImpl().replace_repository_inventory(
+                session,
+                repository.id,
+                discovery_result,
+            )
             await session.commit()
         logger.info("repository indexing task completed job_id=%s repository_id=%s", job_id, repository_id)
     except Exception as exc:

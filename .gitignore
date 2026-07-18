@@ -25,6 +25,7 @@ dist/
 *.pem
 __pycache__/
 *.py[cod]
+.venv/
 
 # debug
 npm-debug.log*

@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     log_level: str
     database_url: str
     redis_url: str
-    repository_workspace_path: str
+    repository_workspace_path: str = "/tmp/codna/repositories"
+    repository_file_max_bytes: int = 10 * 1024 * 1024
+    repository_file_discovery_limit: int = 5000
     openai_api_key: str | None = None
     github_client_id: str | None = None
     github_client_secret: str | None = None

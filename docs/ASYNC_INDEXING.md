@@ -7,7 +7,9 @@ This document describes the asynchronous indexing infrastructure milestone after
 The goal is to establish the asynchronous execution framework before adding parsing, embeddings, graph generation, or AI functionality.
 
 This milestone is implemented as infrastructure only.
-The worker task now performs a shallow Git clone into a controlled local workspace, updates repository and job status, and exits successfully.
+The worker task performs a shallow Git clone into a controlled local workspace, discovers safe file metadata, updates repository and job status, and exits successfully.
+
+For the repository inventory schema, API checks, and troubleshooting steps, see [Repository Inventory and File Discovery](REPOSITORY_INVENTORY.md).
 
 ## Target Flow
 
@@ -24,7 +26,7 @@ Create Job record with status=queued
 Publish Celery task to Redis broker
         |
         v
-Worker executes clone task
+Worker executes clone and file discovery task
         |
         v
 Update repository and job statuses
@@ -82,7 +84,7 @@ The Celery application should not import the FastAPI application object. This pr
 
 The worker is a separate process from FastAPI. It listens to the Redis broker and executes registered tasks.
 
-The worker performs repository cloning in this milestone.
+The worker performs repository cloning and file metadata discovery in this milestone.
 It does not parse, embed, graph, or analyze source code yet.
 
 ### Job service
@@ -129,10 +131,13 @@ When the worker receives the task:
 4. It marks the job `running` and records `started_at`.
 5. It changes the repository status to `cloning`.
 6. It shallow-clones the repository into the configured worker workspace.
-7. It marks the job `completed` and records `completed_at`.
-8. It changes the repository status to `ready`.
-9. It stores internal clone metadata.
-10. It commits the final transaction and closes the database session.
+7. It marks the repository as `indexing`.
+8. It discovers file metadata from the clone while skipping unsafe or noisy paths.
+9. It replaces the repository's stored file list.
+10. It marks the job `completed` and records `completed_at`.
+11. It changes the repository status to `ready`.
+12. It stores internal clone metadata and public indexing timestamps.
+13. It commits the final transaction and closes the database session.
 
 If an exception occurs:
 
@@ -248,6 +253,8 @@ The worker and API need the same broker configuration:
 ```text
 REDIS_URL=redis://redis:6379/0
 REPOSITORY_WORKSPACE_PATH=/var/lib/codna/repositories
+REPOSITORY_FILE_MAX_BYTES=10485760
+REPOSITORY_FILE_DISCOVERY_LIMIT=5000
 ```
 
 The value must continue to come from `Settings`. The worker should receive it through Docker Compose environment injection in the same way as the API.
@@ -351,7 +358,6 @@ Two simultaneous start requests must not create duplicate active jobs for the sa
 The worker must not yet:
 
 - Synchronize branches, commits, issues, or pull requests.
-- Walk the repository filesystem.
 - Parse code with Tree-sitter.
 - Generate semantic chunks.
 - Call OpenAI or another embedding provider.
@@ -359,7 +365,7 @@ The worker must not yet:
 - Create graph nodes or edges.
 - Generate AI answers.
 
-The clone-first task proves that a request can move through API, PostgreSQL, Redis, Celery, worker, Git, local workspace storage, and status polling successfully.
+The file discovery task proves that a request can move through API, PostgreSQL, Redis, Celery, worker, Git, local workspace storage, filesystem scanning, metadata persistence, and status polling successfully.
 
 ## Implementation Order
 
@@ -449,17 +455,21 @@ celery -A app.core.celery:celery_app worker --loglevel=INFO
 
 The worker must depend on Redis and PostgreSQL being available. Database access from a task must use a short-lived async session and must always close the session.
 
-### 7. Clone-first background task
+### 7. Clone and file discovery background task
 
-The first task deliberately performs only the repository cloning stage:
+The task deliberately performs only repository cloning and safe file metadata discovery:
 
 1. Load the job and repository.
 2. Mark the job `running`.
 3. Set the repository status to `cloning`.
 4. Shallow-clone the repository into the configured workspace.
-5. Mark the job `completed`.
-6. Set the repository status to `ready`.
-7. Store internal clone path and `last_cloned_at`.
+5. Set the repository status to `indexing`.
+6. Walk the cloned repository.
+7. Skip VCS folders, dependency folders, build outputs, env files, large files, binary files, and symlinks.
+8. Persist file path, extension, language hint, size, and SHA-256 hash.
+9. Mark the job `completed`.
+10. Set the repository status to `ready`.
+11. Store internal clone path, `last_cloned_at`, and `last_indexed_at`.
 
 The task must not call GitHub synchronization APIs, parse files, generate embeddings, or build graph data.
 
@@ -554,9 +564,45 @@ The expected sequence is:
 queued -> running -> completed
 ```
 
-The repository should end in `ready` after the clone-first task completes.
+The repository should end in `ready` after the clone and inventory task completes.
 
-### 5. Verify failure and ownership behavior
+### 5. List discovered files
+
+```bash
+curl -i \
+  "http://localhost:8001/api/v1/repositories/{repository_id}/files?page=1&page_size=100" \
+  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+```
+
+Expected status: `200 OK`.
+
+Expected response shape:
+
+```json
+{
+  "files": [
+    {
+      "path": "README.md",
+      "extension": "md",
+      "language": "Markdown",
+      "size_bytes": 1234
+    }
+  ],
+  "page": 1,
+  "page_size": 100,
+  "has_next_page": false
+}
+```
+
+Fetch persisted inventory statistics:
+
+```bash
+curl -i \
+  "http://localhost:8001/api/v1/repositories/{repository_id}/stats" \
+  -H "Authorization: Bearer ${CODEDNA_TOKEN}"
+```
+
+### 6. Verify failure and ownership behavior
 
 Test that:
 
@@ -578,6 +624,9 @@ The milestone should include tests for:
 - Missing repository handling.
 - Clone task success transitions.
 - Clone task failure transitions.
+- Repository file discovery.
+- Ignore rules, binary detection, language detection, hash generation, and statistics generation.
+- Inventory pagination, filtering, persistence, and ownership checks.
 
 The tests should mock Celery enqueueing and use isolated database/service boundaries. They should not require a live GitHub API.
 
@@ -593,6 +642,9 @@ Job record + Celery task
         |
         v
 Clone repository
+        |
+        v
+Discover repository inventory
         |
         v
 Parse with Tree-sitter
@@ -615,9 +667,11 @@ The milestone is complete only when all of the following are true:
 - The task is visible to and consumed by the Celery worker.
 - The worker can update PostgreSQL job state.
 - The worker can update repository state.
+- The worker persists repository file inventory and repository statistics before marking a repository ready.
 - The status endpoint reports queued, running, completed, and failed states correctly.
 - Unauthorized users cannot start or read jobs.
+- Unauthorized users cannot read another user's repository inventory or statistics.
 - Duplicate active indexing requests follow the documented policy.
 - API, worker, Redis, PostgreSQL, and migration containers work together in Docker.
-- Tests cover producer behavior, task transitions, failure handling, and ownership checks.
-- Extending the clone-first task does not require changing the public API contract.
+- Tests cover producer behavior, task transitions, inventory discovery, failure handling, and ownership checks.
+- Extending the inventory task into parser stages does not require changing the repository onboarding API contract.
