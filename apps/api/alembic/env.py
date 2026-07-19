@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.db.models import job  # noqa: F401
 from app.db.models import repository  # noqa: F401
 from app.db.models import repository_chunk  # noqa: F401
+from app.db.models import repository_chunk_embedding  # noqa: F401
 from app.db.models import user  # noqa: F401
 
 

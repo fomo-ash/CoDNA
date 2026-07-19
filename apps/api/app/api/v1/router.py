@@ -11,6 +11,7 @@ from app.modules.jobs.router import router as jobs_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.parsing.router import router as parsing_router
 from app.modules.repositories.router import router as repositories_router
+from app.modules.retrieval.router import router as retrieval_router
 
 
 api_router = APIRouter(prefix="/api/v1")
@@ -24,3 +25,4 @@ api_router.include_router(parsing_router)
 api_router.include_router(knowledge_router)
 api_router.include_router(chunks_repository_router)
 api_router.include_router(chunk_router)
+api_router.include_router(retrieval_router)

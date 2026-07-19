@@ -21,6 +21,7 @@ from app.db.models.user import User
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.service import RepositoryFileServiceImpl
 from app.modules.chunks.service import RepositoryChunkServiceImpl
+from app.modules.embeddings.service import RepositoryChunkEmbeddingService
 from app.modules.jobs.enums import JobStatus
 from app.modules.knowledge.service import KnowledgeExtractionContext, RepositoryKnowledgeServiceImpl
 from app.modules.parsing.results import RepositoryParseResult, parse_result_from_dict
@@ -36,6 +37,11 @@ logger = logging.getLogger("app.workers.repository_index")
 @celery_app.task(name="app.workers.tasks.run_repository_index")
 def run_repository_index(job_id: str, repository_id: str) -> None:
     asyncio.run(_run_repository_index(UUID(job_id), UUID(repository_id)))
+
+
+@celery_app.task(name="app.workers.tasks.embed_repository_chunks")
+def embed_repository_chunks(repository_id: str) -> None:
+    asyncio.run(_embed_repository_chunks(UUID(repository_id)))
 
 
 async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
@@ -156,11 +162,31 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
             job.error_message = None
             repository.last_indexed_at = completed_at
             await session.commit()
+        # Embeddings are deliberately a separate job: the index stays usable even if
+        # a provider is unavailable, and this task reads repository_chunks only.
+        if _embedding_provider_configured(settings):
+            embed_repository_chunks.delay(str(repository_id))
         logger.info("repository indexing task completed job_id=%s repository_id=%s", job_id, repository_id)
     except Exception as exc:
         logger.exception("repository indexing task failed job_id=%s repository_id=%s", job_id, repository_id)
         await _mark_failed(job_id, repository_id, str(exc))
         raise
+
+
+async def _embed_repository_chunks(repository_id: UUID) -> None:
+    settings = get_settings()
+    async with worker_session() as session:
+        result = await RepositoryChunkEmbeddingService(settings).embed_repository_chunks(session, repository_id)
+    logger.info(
+        "repository chunk embedding completed repository_id=%s embedded=%s skipped=%s",
+        repository_id, result.embedded, result.skipped,
+    )
+
+
+def _embedding_provider_configured(settings) -> bool:
+    if getattr(settings, "embedding_provider", "google") == "google":
+        return bool(getattr(settings, "google_api_key", None))
+    return bool(getattr(settings, "openai_api_key", None))
 
 
 async def _get_job_and_repository(

@@ -1,0 +1,16 @@
+# This Dockerfile builds only the web workspace.  Keep its context small when
+# Docker is running through WSL against a Windows-mounted repository.
+*
+!package.json
+!package-lock.json
+!turbo.json
+!apps/
+!apps/web/
+!apps/web/**
+
+# Generated and local-only web files must not re-enter through the allowlist.
+apps/web/node_modules
+apps/web/.next
+apps/web/.env
+apps/web/.env.*
+apps/web/*.tsbuildinfo

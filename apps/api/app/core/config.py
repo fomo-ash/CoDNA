@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from typing import Literal
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +19,18 @@ class Settings(BaseSettings):
     repository_file_max_bytes: int = 10 * 1024 * 1024
     repository_file_discovery_limit: int = 5000
     openai_api_key: str | None = None
+    google_api_key: str | None = None
+    embedding_provider: Literal["openai", "google"] = "google"
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = 1536
+    embedding_batch_size: int = 64
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def validate_embedding_dimensions(cls, value: int) -> int:
+        if value != 1536:
+            raise ValueError("EMBEDDING_DIMENSIONS must be 1536 for the configured pgvector index.")
+        return value
     github_client_id: str | None = None
     github_client_secret: str | None = None
     jwt_secret: str | None = None
