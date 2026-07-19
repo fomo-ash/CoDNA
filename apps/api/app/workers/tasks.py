@@ -10,13 +10,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.celery import celery_app
 from app.core.config import get_settings
 from app.db.models.job import Job
 from app.db.models.repository import Repository
 from app.db.models.repository_file import RepositoryFile
+from app.db.models.repository_question_cache import RepositoryQuestionCache
 from app.db.models.user import User
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.service import RepositoryFileServiceImpl
@@ -161,6 +162,9 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
             job.completed_at = completed_at
             job.error_message = None
             repository.last_indexed_at = completed_at
+            await session.execute(
+                delete(RepositoryQuestionCache).where(RepositoryQuestionCache.repository_id == repository.id)
+            )
             await session.commit()
         # Embeddings are deliberately a separate job: the index stays usable even if
         # a provider is unavailable, and this task reads repository_chunks only.

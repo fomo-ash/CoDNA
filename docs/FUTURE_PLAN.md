@@ -4,7 +4,7 @@
 
 Repository indexing now creates durable inventory, parse results, extracted knowledge items, and repository-aware semantic chunks. Chunks include source content, source ranges, stable identifiers, static-analysis metadata, and deterministic local relationships. Chunk embeddings and owner-scoped hybrid retrieval are available.
 
-The current system intentionally has no LLM answer generation, chat, graph persistence, repository-history ingestion, or incremental indexing. Retrieval is production-shaped search, not yet a natural-language answer service.
+The current system intentionally has no graph persistence, repository-history ingestion, or incremental indexing. Repository questions now return citation-first, repository-aware answers with a global spend guard and repeat-question cache.
 
 ## Product Positioning and Differentiation
 
@@ -39,15 +39,15 @@ The product must make this promise concrete:
 - Completed 2026-07-19: embedding generation is idempotent by source hash and embedding model.
 - Completed 2026-07-19: exact code-symbol queries boost matching chunk titles, so a class or function definition ranks ahead of files that only import or use it.
 
-### 2. Repository Question API — Next
+### 2. Repository Question API
 
-- Add a repository-scoped question endpoint that builds on the existing search endpoint; keep search available as the transparent debugging/evidence API.
-- Retrieve relevant chunks first, then construct bounded context for an LLM provider.
-- Return a concise answer plus mandatory citations containing chunk IDs, paths, and line ranges.
-- If evidence is insufficient or conflicting, say so and return the best matching citations rather than inventing an answer.
-- Persist request status and safe telemetry, never provider credentials or raw private repository tokens.
-- Add per-user and per-repository rate, context, and spend guards before enabling public access.
-- Cache citation-preserving answers and invalidate them after repository re-indexing.
+- Completed 2026-07-19: `POST /api/v1/repositories/{repository_id}/questions` retrieves bounded evidence before generating an answer; search remains available as the transparent evidence API.
+- Completed 2026-07-19: answers are citation-first, return only cited chunks with paths and line ranges, and rebase citations to a contiguous order.
+- Completed 2026-07-19: direct local imports and calls expand answer context within a strict related-chunk cap, enabling repository-aware active-path reasoning without graph persistence.
+- Completed 2026-07-19: answer policies distinguish active versus alternate paths when supported, provide bounded architecture/impact reasoning, and avoid unsupported dead-code claims.
+- Completed 2026-07-19: safe usage telemetry stores provider, model, token counts, cost, and status only; prompts, answers, credentials, and private tokens are not stored as telemetry.
+- Completed 2026-07-19: a global project-level $4 answer budget reserves worst-case cost before provider calls and records actual cost afterward.
+- Completed 2026-07-19: normalized repeat questions use a citation-preserving cache; cache entries are invalidated after repository re-indexing and answer-policy changes.
 
 ### 3. Persistent Relationship Graph
 

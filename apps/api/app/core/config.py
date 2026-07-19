@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from decimal import Decimal
 
 from typing import Literal
 
@@ -24,6 +25,13 @@ class Settings(BaseSettings):
     embedding_model: str = "gemini-embedding-001"
     embedding_dimensions: int = 1536
     embedding_batch_size: int = 64
+    answer_provider: Literal["openai", "google"] = "openai"
+    answer_model: str = "gpt-5.4-mini"
+    answer_max_context_chunks: int = 8
+    answer_max_related_chunks: int = 4
+    answer_max_context_characters: int = 18000
+    answer_max_output_tokens: int = 1600
+    answer_budget_usd: Decimal = Decimal("4.00")
 
     @field_validator("embedding_dimensions")
     @classmethod
