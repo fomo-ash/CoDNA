@@ -40,3 +40,14 @@ class RepositoryImpactTraversalResponse(BaseModel):
     depth: int
     affected_paths: list[str]
     paths: list[list[str]]
+
+
+class RepositorySymbolImpactTraversalResponse(BaseModel):
+    """Resolved reverse dependency paths for one stable repository symbol."""
+
+    repository_id: UUID
+    stable_symbol_id: str
+    depth: int
+    affected_symbol_ids: list[str]
+    affected_paths: list[str]
+    paths: list[list[str]]

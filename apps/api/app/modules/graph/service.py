@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.repository import Repository
 from app.db.models.repository_relationship_edge import RepositoryRelationshipEdge
-from app.modules.graph.schemas import RepositoryGraphResponse, RepositoryImpactResponse, RepositoryImpactTraversalResponse, RelationshipEdgeRead
+from app.modules.graph.schemas import (
+    RelationshipEdgeRead,
+    RepositoryGraphResponse,
+    RepositoryImpactResponse,
+    RepositoryImpactTraversalResponse,
+    RepositorySymbolImpactTraversalResponse,
+)
 from app.modules.repositories.service import RepositoryNotFoundError
 
 
@@ -39,6 +45,84 @@ class RepositoryGraphService:
             if not frontier:
                 break
         return RepositoryImpactTraversalResponse(repository_id=repository_id, path=path, depth=depth, affected_paths=sorted(visited - {path}), paths=paths)
+
+    async def traverse_symbol_impact(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        owner_id: UUID,
+        stable_symbol_id: str,
+        depth: int,
+    ) -> RepositorySymbolImpactTraversalResponse:
+        """Return resolved callers/references of a symbol without inferring missing links."""
+        stable_symbol_id = stable_symbol_id.strip()
+        await self._ensure_owner(session, repository_id, owner_id)
+        rows = (await session.scalars(select(RepositoryRelationshipEdge).where(
+            RepositoryRelationshipEdge.repository_id == repository_id,
+            RepositoryRelationshipEdge.resolution == "resolved",
+            RepositoryRelationshipEdge.relationship_type.in_(("calls", "references", "inherits", "implements")),
+            RepositoryRelationshipEdge.source_stable_symbol_id.is_not(None),
+            RepositoryRelationshipEdge.target_stable_symbol_id.is_not(None),
+        ))).all()
+        by_target: dict[str, list[RepositoryRelationshipEdge]] = {}
+        source_paths: dict[str, str] = {}
+        for row in rows:
+            if (
+                row.relationship_type in {"calls", "references", "inherits", "implements"}
+                and row.target_stable_symbol_id
+                and row.source_stable_symbol_id
+            ):
+                by_target.setdefault(row.target_stable_symbol_id, []).append(row)
+                source_paths.setdefault(row.source_stable_symbol_id, row.source_path)
+
+        paths, visited = self._symbol_reverse_paths(rows, stable_symbol_id, depth, by_target)
+
+        affected_symbol_ids = sorted(visited - {stable_symbol_id})
+        return RepositorySymbolImpactTraversalResponse(
+            repository_id=repository_id,
+            stable_symbol_id=stable_symbol_id,
+            depth=depth,
+            affected_symbol_ids=affected_symbol_ids,
+            affected_paths=sorted({source_paths[symbol] for symbol in affected_symbol_ids if symbol in source_paths}),
+            paths=paths,
+        )
+
+    @classmethod
+    def _symbol_reverse_paths(
+        cls,
+        rows: list[RepositoryRelationshipEdge],
+        stable_symbol_id: str,
+        depth: int,
+        by_target: dict[str, list[RepositoryRelationshipEdge]] | None = None,
+    ) -> tuple[list[list[str]], set[str]]:
+        if by_target is None:
+            by_target = {}
+            for row in rows:
+                if (
+                    row.relationship_type in {"calls", "references", "inherits", "implements"}
+                    and row.target_stable_symbol_id
+                    and row.source_stable_symbol_id
+                ):
+                    by_target.setdefault(row.target_stable_symbol_id, []).append(row)
+
+        frontier = [(stable_symbol_id, [stable_symbol_id])]
+        paths: list[list[str]] = []
+        visited = {stable_symbol_id}
+        for _ in range(depth):
+            next_frontier = []
+            for current, chain in frontier:
+                for edge in by_target.get(current, []):
+                    source = edge.source_stable_symbol_id
+                    if source is None or source in visited or cls._is_test_path(edge.source_path):
+                        continue
+                    visited.add(source)
+                    next_chain = [*chain, source]
+                    paths.append(next_chain)
+                    next_frontier.append((source, next_chain))
+            frontier = next_frontier
+            if not frontier:
+                break
+        return paths, visited - {stable_symbol_id}
     async def graph(self, session: AsyncSession, repository_id: UUID, owner_id: UUID, limit: int) -> RepositoryGraphResponse:
         await self._ensure_owner(session, repository_id, owner_id)
         rows = await session.scalars(select(RepositoryRelationshipEdge).where(
