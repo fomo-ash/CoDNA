@@ -29,6 +29,7 @@ class RepositoryCloneTarget:
 class RepositoryCloneResult:
     clone_path: Path
     cloned_at: datetime
+    revision: str | None
 
 
 class RepositoryCloneService:
@@ -63,7 +64,20 @@ class RepositoryCloneService:
                 shutil.rmtree(clone_path)
             raise RepositoryCloneError(self._format_git_error(stderr))
 
-        return RepositoryCloneResult(clone_path=clone_path, cloned_at=datetime.now(UTC))
+        return RepositoryCloneResult(
+            clone_path=clone_path,
+            cloned_at=datetime.now(UTC),
+            revision=await self._read_revision(clone_path),
+        )
+
+    async def _read_revision(self, clone_path: Path) -> str | None:
+        process = await asyncio.create_subprocess_exec(
+            "git", "rev-parse", "HEAD", cwd=clone_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _stderr = await process.communicate()
+        revision = stdout.decode("utf-8", errors="replace").strip()
+        return revision if process.returncode == 0 and revision else None
 
     def _ensure_safe_clone_path(self, clone_path: Path) -> None:
         resolved_workspace = self.workspace_path.resolve()

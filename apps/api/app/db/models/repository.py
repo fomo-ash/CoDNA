@@ -41,3 +41,4 @@ class Repository(TimestampedUUIDModel):
     )
     last_cloned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_indexed_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)

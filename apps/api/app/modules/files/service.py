@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -15,6 +16,18 @@ from app.modules.files.schemas import (
     RepositoryStatsRead,
 )
 from app.modules.repositories.service import RepositoryNotFoundError
+
+
+@dataclass(frozen=True)
+class RepositoryInventoryDelta:
+    """The content-level change set produced by an inventory scan."""
+
+    changed_files: list[RepositoryFile]
+    removed_paths: list[str]
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.changed_files or self.removed_paths)
 
 
 class RepositoryFileServiceImpl:
@@ -125,6 +138,63 @@ class RepositoryFileServiceImpl:
         stats.total_size_bytes = discovery_result.stats.total_size_bytes
         stats.detected_languages = discovery_result.stats.detected_languages
         stats.last_scan_at = discovery_result.stats.last_scan_at
+
+    async def synchronize_repository_inventory(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        discovery_result: RepositoryDiscoveryResult,
+    ) -> RepositoryInventoryDelta:
+        """Persist an inventory scan while retaining rows for unchanged content."""
+        existing_result = await session.execute(
+            select(RepositoryFile).where(RepositoryFile.repository_id == repository_id)
+        )
+        existing_by_path = {file.path: file for file in existing_result.scalars().all()}
+        discovered_by_path = {file.path: file for file in discovery_result.files}
+
+        changed_files: list[RepositoryFile] = []
+        for path, discovered in discovered_by_path.items():
+            current = existing_by_path.pop(path, None)
+            if current is None:
+                current = RepositoryFile(repository_id=repository_id, path=path)
+                session.add(current)
+                changed_files.append(current)
+            elif current.sha256 != discovered.sha256:
+                changed_files.append(current)
+
+            current.filename = discovered.filename
+            current.extension = discovered.extension
+            current.language = discovered.language
+            current.size_bytes = discovered.size_bytes
+            current.sha256 = discovered.sha256
+            current.is_binary = discovered.is_binary
+            current.discovered_at = discovered.discovered_at
+
+        removed_paths = sorted(existing_by_path)
+        if removed_paths:
+            await session.execute(
+                delete(RepositoryFile).where(
+                    RepositoryFile.repository_id == repository_id,
+                    RepositoryFile.path.in_(removed_paths),
+                )
+            )
+
+        stats_result = await session.execute(
+            select(RepositoryStatistics).where(RepositoryStatistics.repository_id == repository_id)
+        )
+        stats = stats_result.scalar_one_or_none()
+        if stats is None:
+            stats = RepositoryStatistics(repository_id=repository_id)
+            session.add(stats)
+
+        stats.total_files = discovery_result.stats.total_files
+        stats.source_files = discovery_result.stats.source_files
+        stats.binary_files = discovery_result.stats.binary_files
+        stats.total_size_bytes = discovery_result.stats.total_size_bytes
+        stats.detected_languages = discovery_result.stats.detected_languages
+        stats.last_scan_at = discovery_result.stats.last_scan_at
+        await session.flush()
+        return RepositoryInventoryDelta(changed_files=changed_files, removed_paths=removed_paths)
 
     async def _ensure_repository_owner(
         self,

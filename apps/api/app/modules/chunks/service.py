@@ -59,6 +59,64 @@ class RepositoryChunkServiceImpl:
         self._materialize_relationship_edges(repository_id, persisted_chunks, session)
         return len(chunks)
 
+    async def rebuild_changed_repository_chunks(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        repository_path: Path,
+        paths: set[str],
+    ) -> int:
+        """Replace chunks for changed paths and rebuild their repository graph edges."""
+        if not paths:
+            return 0
+        result = await session.execute(
+            select(RepositoryKnowledgeItem)
+            .where(RepositoryKnowledgeItem.repository_id == repository_id)
+            .order_by(RepositoryKnowledgeItem.path, RepositoryKnowledgeItem.item_type, RepositoryKnowledgeItem.name)
+        )
+        chunks = self.builder.build(repository_path, result.scalars().all(), repository_id)
+        changed_chunks = [chunk for chunk in chunks if chunk.path in paths]
+        for chunk in changed_chunks:
+            chunk.metadata["repository_file_id"] = (
+                str(chunk.repository_file_id) if chunk.repository_file_id else None
+            )
+
+        # Existing edges can reference replaced chunks. Re-materialize them from
+        # the current chunk metadata after replacing only the affected paths.
+        await session.execute(
+            delete(RepositoryRelationshipEdge).where(RepositoryRelationshipEdge.repository_id == repository_id)
+        )
+        await session.execute(
+            delete(RepositoryChunk).where(
+                RepositoryChunk.repository_id == repository_id,
+                RepositoryChunk.path.in_(paths),
+            )
+        )
+        session.add_all(
+            [
+                RepositoryChunk(
+                    repository_id=repository_id,
+                    repository_file_id=chunk.repository_file_id,
+                    path=chunk.path,
+                    chunk_type=chunk.chunk_type,
+                    source_type=chunk.source_type,
+                    title=chunk.title,
+                    language=chunk.language,
+                    content=chunk.content,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    metadata_=chunk.metadata,
+                )
+                for chunk in changed_chunks
+            ]
+        )
+        await session.flush()
+        persisted = await session.scalars(
+            select(RepositoryChunk).where(RepositoryChunk.repository_id == repository_id)
+        )
+        self._materialize_relationship_edges(repository_id, persisted.all(), session)
+        return len(changed_chunks)
+
     @staticmethod
     def _materialize_relationship_edges(
         repository_id: UUID, chunks: list[RepositoryChunk], session: AsyncSession

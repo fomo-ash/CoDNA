@@ -98,6 +98,40 @@ class RepositoryKnowledgeServiceImpl:
             ]
         )
 
+    async def replace_changed_repository_knowledge(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        files: list[RepositoryFile],
+        extraction_result: RepositoryKnowledgeExtractionResult,
+    ) -> None:
+        """Replace knowledge for changed files, preserving unchanged repository facts."""
+        file_ids = [file.id for file in files]
+        if not file_ids:
+            return
+        await session.execute(
+            delete(RepositoryKnowledgeItem).where(
+                RepositoryKnowledgeItem.repository_id == repository_id,
+                RepositoryKnowledgeItem.repository_file_id.in_(file_ids),
+            )
+        )
+        session.add_all(
+            [
+                RepositoryKnowledgeItem(
+                    repository_id=repository_id,
+                    repository_file_id=item.repository_file_id,
+                    path=item.path,
+                    source_type=item.source_type.value,
+                    item_type=item.item_type,
+                    name=item.name,
+                    extractor=item.extractor,
+                    data=item.data,
+                    extracted_at=item.extracted_at,
+                )
+                for item in extraction_result.items
+            ]
+        )
+
     async def list_repository_knowledge_items(
         self,
         session: AsyncSession,

@@ -18,6 +18,7 @@ from app.db.models.job import Job
 from app.db.models.repository import Repository
 from app.db.models.repository_file import RepositoryFile
 from app.db.models.repository_question_cache import RepositoryQuestionCache
+from app.db.models.repository_relationship_edge import RepositoryRelationshipEdge
 from app.db.models.user import User
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.service import RepositoryFileServiceImpl
@@ -97,78 +98,84 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
             repository.status = RepositoryStatus.READY
             repository.clone_path = str(clone_result.clone_path)
             repository.last_cloned_at = clone_result.cloned_at
-            await RepositoryFileServiceImpl().replace_repository_inventory(
+            repository.last_indexed_revision = clone_result.revision
+            inventory_delta = await RepositoryFileServiceImpl().synchronize_repository_inventory(
                 session,
                 repository.id,
                 discovery_result,
             )
             await session.flush()
 
+            changed_paths = {file.path for file in inventory_delta.changed_files}
+            changed_paths.update(inventory_delta.removed_paths)
+            affected_paths = set(changed_paths)
+            if changed_paths:
+                dependent_rows = await session.scalars(
+                    select(RepositoryRelationshipEdge.source_path).where(
+                        RepositoryRelationshipEdge.repository_id == repository.id,
+                        RepositoryRelationshipEdge.target_path.in_(changed_paths),
+                    )
+                )
+                affected_paths.update(dependent_rows.all())
+
             file_rows_result = await session.execute(
                 select(RepositoryFile).where(RepositoryFile.repository_id == repository.id)
             )
             repository_files = file_rows_result.scalars().all()
-            parse_result = _parse_repository_in_subprocess(clone_result.clone_path, repository_files)
-            logger.info(
-                "repository parsing completed job_id=%s repository_id=%s files=%s parsed=%s syntax_errors=%s unsupported=%s",
-                job_id,
-                repository_id,
-                len(parse_result.files),
-                parse_result.parsed_files,
-                parse_result.syntax_error_files,
-                parse_result.unsupported_files,
-            )
-            parser_service = RepositoryParserServiceImpl()
-            await parser_service.replace_repository_parse_results(
-                session,
-                repository.id,
-                parse_result,
-            )
-            knowledge_service = RepositoryKnowledgeServiceImpl()
-            knowledge_result = knowledge_service.extract_repository(
-                KnowledgeExtractionContext(
-                    repository_id=repository.id,
-                    repository_path=clone_result.clone_path,
-                    files=repository_files,
-                    parse_result=parse_result,
+            changed_file_ids = {file.id for file in inventory_delta.changed_files}
+            changed_files = [file for file in repository_files if file.id in changed_file_ids]
+            if inventory_delta.has_changes:
+                parse_result = _parse_repository_in_subprocess(clone_result.clone_path, changed_files)
+                logger.info(
+                    "repository incremental parsing completed job_id=%s repository_id=%s files=%s parsed=%s syntax_errors=%s unsupported=%s",
+                    job_id, repository_id, len(parse_result.files), parse_result.parsed_files,
+                    parse_result.syntax_error_files, parse_result.unsupported_files,
                 )
-            )
-            logger.info(
-                "repository knowledge extraction completed job_id=%s repository_id=%s items=%s",
-                job_id,
-                repository_id,
-                knowledge_result.total_items,
-            )
-            await knowledge_service.replace_repository_knowledge(
-                session,
-                repository.id,
-                knowledge_result,
-            )
-            chunk_service = RepositoryChunkServiceImpl()
-            chunk_count = await chunk_service.rebuild_repository_chunks(
-                session,
-                repository.id,
-                clone_result.clone_path,
-            )
-            logger.info(
-                "repository semantic chunking completed job_id=%s repository_id=%s chunks=%s",
-                job_id,
-                repository_id,
-                chunk_count,
-            )
+                parser_service = RepositoryParserServiceImpl()
+                await parser_service.replace_changed_repository_parse_results(
+                    session, repository.id, parse_result,
+                )
+                knowledge_service = RepositoryKnowledgeServiceImpl()
+                knowledge_result = knowledge_service.extract_repository(
+                    KnowledgeExtractionContext(
+                        repository_id=repository.id,
+                        repository_path=clone_result.clone_path,
+                        files=changed_files,
+                        parse_result=parse_result,
+                    )
+                )
+                logger.info(
+                    "repository incremental knowledge extraction completed job_id=%s repository_id=%s items=%s",
+                    job_id, repository_id, knowledge_result.total_items,
+                )
+                await knowledge_service.replace_changed_repository_knowledge(
+                    session, repository.id, changed_files, knowledge_result,
+                )
+                chunk_service = RepositoryChunkServiceImpl()
+                chunk_count = await chunk_service.rebuild_changed_repository_chunks(
+                    session, repository.id, clone_result.clone_path, affected_paths,
+                )
+                logger.info(
+                    "repository incremental semantic chunking completed job_id=%s repository_id=%s chunks=%s",
+                    job_id, repository_id, chunk_count,
+                )
+            else:
+                logger.info("repository index unchanged job_id=%s repository_id=%s", job_id, repository_id)
 
             job.status = JobStatus.COMPLETED
             completed_at = datetime.now(UTC)
             job.completed_at = completed_at
             job.error_message = None
-            repository.last_indexed_at = completed_at
-            await session.execute(
-                delete(RepositoryQuestionCache).where(RepositoryQuestionCache.repository_id == repository.id)
-            )
+            if inventory_delta.has_changes or repository.last_indexed_at is None:
+                repository.last_indexed_at = completed_at
+            if inventory_delta.has_changes:
+                await session.execute(
+                    delete(RepositoryQuestionCache).where(RepositoryQuestionCache.repository_id == repository.id)
+                )
             await session.commit()
         # Embeddings are deliberately a separate job: the index stays usable even if
         # a provider is unavailable, and this task reads repository_chunks only.
-        if _embedding_provider_configured(settings):
+        if inventory_delta.has_changes and _embedding_provider_configured(settings):
             embed_repository_chunks.delay(str(repository_id))
         logger.info("repository indexing task completed job_id=%s repository_id=%s", job_id, repository_id)
     except Exception as exc:

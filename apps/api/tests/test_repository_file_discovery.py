@@ -12,10 +12,11 @@ from fastapi import HTTPException
 from fastapi.params import Depends
 
 from app.modules.auth.dependencies import get_current_user_record
+from app.db.models.repository_file import RepositoryFile
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.router import get_repository_stats, list_repository_files
 from app.modules.files.schemas import RepositoryFileListResponse, RepositoryFileRead, RepositoryStatsRead
-from app.modules.files.service import RepositoryFileServiceImpl
+from app.modules.files.service import RepositoryFileServiceImpl, RepositoryInventoryDelta
 from app.modules.jobs.enums import JobStatus
 from app.modules.repositories.enums import RepositoryStatus
 from app.modules.repositories.service import RepositoryNotFoundError
@@ -278,6 +279,30 @@ class FakeInventorySession:
         self.added_all.extend(items)
 
 
+class FakeIncrementalInventorySession:
+    def __init__(self, existing_rows, stats=None) -> None:
+        self.existing_rows = existing_rows
+        self.stats = stats
+        self.added = []
+        self.deleted = []
+        self._select_count = 0
+
+    async def execute(self, statement):
+        statement_text = str(statement)
+        if "repository_files" in statement_text and "SELECT" in statement_text:
+            return FakeExecuteResult(rows=self.existing_rows)
+        if "repository_statistics" in statement_text:
+            return FakeExecuteResult(scalar_value=self.stats)
+        self.deleted.append(statement)
+        return FakeExecuteResult()
+
+    def add(self, item):
+        self.added.append(item)
+
+    async def flush(self):
+        return None
+
+
 def test_repository_file_service_persists_files_and_statistics(tmp_path) -> None:
     (tmp_path / "app.py").write_text("print('hello')\n", encoding="utf-8")
     discovery_result = RepositoryFileDiscoveryService().discover(tmp_path)
@@ -298,6 +323,51 @@ def test_repository_file_service_persists_files_and_statistics(tmp_path) -> None
     assert len(session.added) == 1
     assert session.added[0].total_files == 1
     assert session.added[0].detected_languages == {"Python": 1}
+
+
+def test_repository_file_service_synchronizes_only_changed_and_removed_files(tmp_path) -> None:
+    (tmp_path / "same.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "changed.py").write_text("value = 2\n", encoding="utf-8")
+    discovery_result = RepositoryFileDiscoveryService().discover(tmp_path)
+    same = next(file for file in discovery_result.files if file.path == "same.py")
+    changed = next(file for file in discovery_result.files if file.path == "changed.py")
+    existing_same = SimpleNamespace(
+        path="same.py", sha256=same.sha256, filename="same.py", extension="py",
+        language="Python", size_bytes=same.size_bytes, is_binary=False, discovered_at=None,
+    )
+    existing_changed = SimpleNamespace(
+        path="changed.py", sha256="0" * 64, filename="changed.py", extension="py",
+        language="Python", size_bytes=0, is_binary=False, discovered_at=None,
+    )
+    removed = SimpleNamespace(path="removed.py", sha256="1" * 64)
+    session = FakeIncrementalInventorySession([existing_same, existing_changed, removed])
+
+    delta = asyncio.run(
+        RepositoryFileServiceImpl().synchronize_repository_inventory(
+            session, REPOSITORY_ID, discovery_result
+        )
+    )
+
+    assert delta.changed_files == [existing_changed]
+    assert delta.removed_paths == ["removed.py"]
+    assert existing_changed.sha256 == changed.sha256
+    assert not [item for item in session.added if isinstance(item, RepositoryFile)]
+
+
+def test_repository_file_service_synchronizes_new_files(tmp_path) -> None:
+    (tmp_path / "new.py").write_text("value = 1\n", encoding="utf-8")
+    discovery_result = RepositoryFileDiscoveryService().discover(tmp_path)
+    session = FakeIncrementalInventorySession([])
+
+    delta = asyncio.run(
+        RepositoryFileServiceImpl().synchronize_repository_inventory(
+            session, REPOSITORY_ID, discovery_result
+        )
+    )
+
+    assert [file.path for file in delta.changed_files] == ["new.py"]
+    assert delta.removed_paths == []
+    assert [file.path for file in session.added if hasattr(file, "path")] == ["new.py"]
 
 
 def test_repository_file_service_raises_when_repository_not_owned() -> None:
@@ -344,13 +414,14 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
 
         async def clone_repository(self, target):
             assert target.repository_id == REPOSITORY_ID
-            return SimpleNamespace(clone_path=tmp_path, cloned_at=timestamp)
+            return SimpleNamespace(clone_path=tmp_path, cloned_at=timestamp, revision="a" * 40)
 
     class FakeRepositoryFileService:
-        async def replace_repository_inventory(self, session, repository_id, discovery_result):
+        async def synchronize_repository_inventory(self, session, repository_id, discovery_result):
             del session
             persisted["repository_id"] = repository_id
             persisted["result"] = discovery_result
+            return RepositoryInventoryDelta(changed_files=[file_row], removed_paths=[])
 
     class FakeParserService:
         def parse_repository(self, repository_path, files):
@@ -363,7 +434,7 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
                 unsupported_files=0,
             )
 
-        async def replace_repository_parse_results(self, session, repository_id, parse_result):
+        async def replace_changed_repository_parse_results(self, session, repository_id, parse_result):
             del session
             persisted["parse_repository_id"] = repository_id
             persisted["parse_result"] = parse_result
@@ -373,16 +444,18 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
             persisted["knowledge_context"] = context
             return SimpleNamespace(items=[], total_items=0)
 
-        async def replace_repository_knowledge(self, session, repository_id, extraction_result):
+        async def replace_changed_repository_knowledge(self, session, repository_id, files, extraction_result):
             del session
             persisted["knowledge_repository_id"] = repository_id
+            persisted["knowledge_files"] = files
             persisted["knowledge_result"] = extraction_result
 
     class FakeChunkService:
-        async def rebuild_repository_chunks(self, session, repository_id, repository_path):
+        async def rebuild_changed_repository_chunks(self, session, repository_id, repository_path, paths):
             del session
             persisted["chunk_repository_id"] = repository_id
             persisted["chunk_repository_path"] = repository_path
+            persisted["chunk_paths"] = paths
             return 0
 
     async def fake_to_thread(function, *args):
@@ -394,22 +467,32 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     async def fake_flush():
         return None
 
+    file_row = SimpleNamespace(
+        id=uuid4(),
+        repository_id=REPOSITORY_ID,
+        path="app.py",
+        filename="app.py",
+        extension="py",
+        language="Python",
+        is_binary=False,
+    )
+
     async def fake_execute(statement):
         del statement
-        file_row = SimpleNamespace(
-            id=uuid4(),
-            repository_id=REPOSITORY_ID,
-            path="app.py",
-            filename="app.py",
-            extension="py",
-            language="Python",
-            is_binary=False,
-        )
         return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [file_row]))
+
+    async def fake_scalars(statement):
+        del statement
+        return SimpleNamespace(all=lambda: [])
 
     @asynccontextmanager
     async def fake_worker_session_with_async_commit():
-        yield SimpleNamespace(commit=fake_commit, flush=fake_flush, execute=fake_execute)
+        yield SimpleNamespace(
+            commit=fake_commit,
+            flush=fake_flush,
+            execute=fake_execute,
+            scalars=fake_scalars,
+        )
 
     monkeypatch.setattr(tasks, "worker_session", fake_worker_session_with_async_commit)
     monkeypatch.setattr(tasks, "_get_job_and_repository", fake_get_job_and_repository)
@@ -447,8 +530,10 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     assert persisted["knowledge_repository_id"] == REPOSITORY_ID
     assert persisted["knowledge_context"].repository_id == REPOSITORY_ID
     assert persisted["knowledge_context"].repository_path == tmp_path
+    assert [file.path for file in persisted["knowledge_files"]] == ["app.py"]
     assert persisted["chunk_repository_id"] == REPOSITORY_ID
     assert persisted["chunk_repository_path"] == tmp_path
+    assert persisted["chunk_paths"] == {"app.py"}
 
 
 def test_worker_failure_path_marks_job_and_repository_failed(monkeypatch, tmp_path) -> None:

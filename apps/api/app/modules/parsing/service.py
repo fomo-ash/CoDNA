@@ -211,6 +211,45 @@ class RepositoryParserServiceImpl:
             ]
         )
 
+    async def replace_changed_repository_parse_results(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        parse_result: RepositoryParseResult,
+    ) -> None:
+        """Replace parse rows only for files included in an incremental scan."""
+        file_ids = [file.repository_file_id for file in parse_result.files]
+        if not file_ids:
+            return
+        await session.execute(
+            delete(RepositoryFileParse).where(
+                RepositoryFileParse.repository_id == repository_id,
+                RepositoryFileParse.repository_file_id.in_(file_ids),
+            )
+        )
+        session.add_all(
+            [
+                RepositoryFileParse(
+                    repository_id=repository_id,
+                    repository_file_id=file.repository_file_id,
+                    path=file.path,
+                    language=file.language,
+                    parser=file.parser,
+                    status=file.status.value,
+                    root_node_type=file.root_node_type,
+                    has_error=file.has_error,
+                    error_count=file.error_count,
+                    symbol_count=file.symbol_count,
+                    import_count=file.import_count,
+                    symbols=file.symbols,
+                    imports=file.imports,
+                    parsed_at=file.parsed_at,
+                    error_message=file.error_message,
+                )
+                for file in parse_result.files
+            ]
+        )
+
     def _get_parser(self, extension: str) -> tuple[str, Parser]:
         if extension not in self._parsers:
             parser_name, language_factory = SUPPORTED_GRAMMARS[extension]
