@@ -11,7 +11,8 @@ import {
   RepositoryFile,
   RepositoryFileParseRead,
   RepositoryKnowledgeItemRead,
-  RepositoryChunkRead
+  RepositoryChunkRead,
+  RepositoryHistoryArtifact,
 } from "../../../types/api";
 import Header from "../../../components/Header";
 
@@ -19,7 +20,7 @@ interface PageProps {
   params: Promise<{ id: string }> | { id: string };
 }
 
-type TabType = "overview" | "files" | "parse" | "knowledge" | "chunks";
+type TabType = "overview" | "files" | "parse" | "knowledge" | "history" | "chunks";
 
 function RepositoryDetailsContent({ params }: PageProps) {
   const router = useRouter();
@@ -62,6 +63,11 @@ function RepositoryDetailsContent({ params }: PageProps) {
   const [knowledgeSourceFilter, setKnowledgeSourceFilter] = useState("");
   const [knowledgeItemTypeFilter, setKnowledgeItemTypeFilter] = useState("");
 
+  // --- Repository decision history ---
+  const [historyArtifacts, setHistoryArtifacts] = useState<RepositoryHistoryArtifact[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
+
   // --- Tab 5: Chunks Index States ---
   const [chunks, setChunks] = useState<RepositoryChunkRead[]>([]);
   const [chunksPage, setChunksPage] = useState(1);
@@ -89,7 +95,8 @@ function RepositoryDetailsContent({ params }: PageProps) {
     const loadMetadata = async () => {
       const token = localStorage.getItem("codedna_jwt");
       if (!token) {
-        router.push("/");
+        setIsLoading(false);
+        router.replace("/");
         return;
       }
 
@@ -194,6 +201,22 @@ function RepositoryDetailsContent({ params }: PageProps) {
     fetchKnowledge();
   }, [id, repo, activeTab, knowledgePage, knowledgeSourceFilter, knowledgeItemTypeFilter, knowledgeSearch, knowledgePageSize]);
 
+  useEffect(() => {
+    if (!id || !repo || repo.status !== "ready" || activeTab !== "history") return;
+    const fetchHistory = async () => {
+      setIsHistoryLoading(true);
+      try {
+        const response = await api.getRepositoryHistory(id);
+        setHistoryArtifacts(response.artifacts || []);
+      } catch (err) {
+        console.error("Failed to load repository history", err);
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
+    fetchHistory();
+  }, [id, repo, activeTab]);
+
   // Tab 5: Fetch Chunks
   useEffect(() => {
     if (!id || !repo || repo.status !== "ready" || activeTab !== "chunks") return;
@@ -257,7 +280,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert("Copied Stable Symbol ID to clipboard!");
+    alert("Copied the citation ID. Use it to refer to this exact indexed chunk in a question, note, or bug report.");
   };
 
   const handleLogout = () => {
@@ -342,6 +365,11 @@ function RepositoryDetailsContent({ params }: PageProps) {
               <span className="px-[10px] py-[4px] text-[11px] font-w500 rounded-buttons uppercase tracking-wider bg-mist-gray text-slate-gray border border-ink-black/[0.05]">
                 {repo.visibility}
               </span>
+              {repo.embedding_status && (
+                <span className="px-[10px] py-[4px] text-[11px] font-w500 rounded-buttons uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200/50">
+                  embeddings {repo.embedding_status}{repo.embedding_chunk_count ? ` · ${repo.embedding_chunk_count}` : ""}
+                </span>
+              )}
             </div>
             <p className="text-[15px] font-w400 text-slate-gray">
               Owner: <span className="font-w500 text-ink-black">{repo.full_name.split("/")[0]}</span> &bull; Default Branch: <code className="font-mono">{repo.default_branch}</code>
@@ -374,12 +402,13 @@ function RepositoryDetailsContent({ params }: PageProps) {
           <>
             {/* Tabs Selector */}
             <div className="flex items-center gap-3 border-b border-mist-gray pb-4 mb-6 z-10 relative overflow-x-auto">
-              {(["overview", "files", "parse", "knowledge", "chunks"] as TabType[]).map((tab) => {
+              {(["overview", "files", "parse", "knowledge", "history", "chunks"] as TabType[]).map((tab) => {
                 const labels: Record<TabType, string> = {
                   overview: "Overview",
                   files: "Files",
                   parse: "Parse Results",
                   knowledge: "Knowledge Facts",
+                  history: "History",
                   chunks: "Chunks",
                 };
                 return (
@@ -531,7 +560,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
                               </td>
                               <td className="py-[12px] px-[12px] text-right">
                                 <button
-                                  onClick={() => alert(`File Details:\nPath: ${file.path}\nSize: ${formatBytes(file.size_bytes)}\nSHA-256: ${file.sha256}`)}
+                                  onClick={() => alert(`File details:\nPath: ${file.path}\nSize: ${formatBytes(file.size_bytes)}\nType: ${file.is_binary ? "Binary" : file.language || "Unknown"}`)}
                                   className="text-[13px] text-slate-gray hover:text-ink-black transition-colors"
                                 >
                                   View Meta
@@ -811,6 +840,46 @@ function RepositoryDetailsContent({ params }: PageProps) {
               </div>
             )}
 
+            {activeTab === "history" && (
+              <div className="space-y-5 animate-in fade-in duration-200">
+                <div className="flex flex-col gap-3 rounded-cards border border-ink-black/[0.05] bg-fog-white p-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <span className="text-[12px] font-w500 uppercase tracking-wider text-ash-gray">Repository history</span>
+                    <p className="mt-1 text-[13px] text-slate-gray">Commits, pull requests, and issues captured during the latest index.</p>
+                  </div>
+                  <select value={historyTypeFilter} onChange={(event) => setHistoryTypeFilter(event.target.value)} className="rounded-inputs border border-ink-black/[0.1] bg-paper-white px-3 py-2 text-[13px]">
+                    <option value="all">All activity</option>
+                    <option value="commit">Commits</option>
+                    <option value="pull_request">Pull requests</option>
+                    <option value="issue">Issues</option>
+                  </select>
+                </div>
+                {isHistoryLoading ? (
+                  <div className="py-20 text-center text-slate-gray">Loading decision history...</div>
+                ) : historyArtifacts.filter((artifact) => historyTypeFilter === "all" || artifact.artifact_type === historyTypeFilter).length === 0 ? (
+                  <div className="rounded-cards border border-dashed border-ink-black/[0.08] bg-fog-white py-16 text-center text-slate-gray">No history artifacts are available yet. Re-index to refresh commits, pull requests, and issues.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {historyArtifacts.filter((artifact) => historyTypeFilter === "all" || artifact.artifact_type === historyTypeFilter).map((artifact) => (
+                      <a key={artifact.id} href={artifact.url} target="_blank" rel="noreferrer" className="block rounded-cards border border-ink-black/[0.05] bg-paper-white p-4 shadow-subtle transition-colors hover:bg-fog-white">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] font-w500 uppercase tracking-wider">
+                          <span className="rounded-buttons bg-mist-gray px-2 py-1 text-slate-gray">{artifact.artifact_type.replace("_", " ")}</span>
+                          {artifact.data?.state && <span className="rounded-buttons border border-mist-gray px-2 py-1 text-ash-gray">{artifact.data.state}</span>}
+                          <span className="font-mono text-ash-gray">#{artifact.external_id.slice(0, 10)}</span>
+                        </div>
+                        <h3 className="mt-2 text-[15px] font-w500 text-ink-black">{artifact.title || "Untitled artifact"}</h3>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-slate-gray">
+                          {artifact.author_login && <span>@{artifact.author_login}</span>}
+                          {artifact.authored_at && <span>Introduced {new Date(artifact.authored_at).toLocaleString()}</span>}
+                          <span>Open on GitHub ↗</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* TAB CONTENT: Chunks Index & Split Screen Explorer */}
             {activeTab === "chunks" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-in fade-in duration-200">
@@ -959,18 +1028,20 @@ function RepositoryDetailsContent({ params }: PageProps) {
                       </div>
 
                       {/* Stable ID Panel */}
-                      <div className="bg-fog-white border border-ink-black/[0.05] p-3.5 rounded-xl flex items-center justify-between gap-4">
-                        <div className="truncate pr-2">
-                          <span className="text-[10px] font-w500 text-ash-gray uppercase tracking-wider block">Stable Citation ID</span>
-                          <code className="text-[12px] font-mono text-ink-black truncate block mt-0.5">
+                      <div className="bg-fog-white border border-ink-black/[0.05] p-3.5 rounded-xl flex items-start justify-between gap-4">
+                        <div className="min-w-0 pr-2">
+                          <span className="text-[10px] font-w500 text-ash-gray uppercase tracking-wider block">Citation ID</span>
+                          <p className="text-[11px] text-slate-gray mt-0.5">A stable reference for this exact indexed chunk.</p>
+                          <code className="text-[12px] font-mono text-ink-black break-all block mt-1">
                             {selectedChunk.metadata?.stable_symbol_id || selectedChunk.id}
                           </code>
                         </div>
                         <button
                           onClick={() => copyToClipboard(selectedChunk.metadata?.stable_symbol_id || selectedChunk.id)}
+                          title="Copy this stable reference to the clipboard"
                           className="h-8 px-3 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 text-xs font-w500 flex-shrink-0 transition-all cursor-pointer"
                         >
-                          Copy ID
+                          Copy citation ID
                         </button>
                       </div>
 

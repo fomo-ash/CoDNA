@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.v1.router import api_router
@@ -45,6 +46,17 @@ def create_app() -> FastAPI:
         title=app_settings.app_name,
         version=app_settings.app_version,
         lifespan=lifespan,
+    )
+    allowed_origins = [app_settings.frontend_url or "http://localhost:3333"]
+    # Local development commonly serves the web app from port 3333.
+    if "http://localhost:3333" not in allowed_origins:
+        allowed_origins.append("http://localhost:3333")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.add_middleware(AuthContextMiddleware)
     app.state.settings = app_settings

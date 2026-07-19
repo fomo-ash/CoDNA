@@ -32,6 +32,11 @@ export interface Repository {
   updated_at: string;
   last_cloned_at?: string;
   last_indexed_at?: string;
+  embedding_status?: "pending" | "running" | "completed" | "failed";
+  embedding_chunk_count?: number;
+  embedding_error_message?: string | null;
+  embedding_started_at?: string | null;
+  embedding_completed_at?: string | null;
 }
 
 export interface GitHubRepository {
@@ -59,7 +64,6 @@ export interface RepositoryFile {
   extension: string | null;
   language: string | null;
   size_bytes: number;
-  sha256: string;
   is_binary: boolean;
   discovered_at: string;
   created_at: string;
@@ -180,6 +184,26 @@ export interface RepositoryChunkListResponse {
   has_next_page: boolean;
 }
 
+export interface RepositoryHistoryArtifact {
+  id: string;
+  repository_id: string;
+  provider: string;
+  artifact_type: "commit" | "pull_request" | "issue" | string;
+  external_id: string;
+  title: string | null;
+  body: string | null;
+  url: string;
+  author_login: string | null;
+  path: string | null;
+  data: { state?: string | null; labels?: string[] };
+  authored_at: string | null;
+}
+
+export interface RepositoryHistoryListResponse {
+  repository_id: string;
+  artifacts: RepositoryHistoryArtifact[];
+}
+
 export interface RepositorySearchResult {
   chunk: RepositoryChunkRead;
   score: number;
@@ -194,3 +218,20 @@ export interface RepositorySearchResponse {
   vector_search_used: boolean;
 }
 
+export interface RepositoryAnswerCitation {
+  index: number;
+  chunk_id: string;
+  path: string;
+  start_line: number | null;
+  end_line: number | null;
+  title: string;
+}
+
+export interface RepositoryQuestionResponse {
+  repository_id: string;
+  question: string;
+  answer: string;
+  citations: RepositoryAnswerCitation[];
+  vector_search_used: boolean;
+  cached: boolean;
+}

@@ -84,6 +84,7 @@ class RepositoryRetrievalService:
             "query": query,
             "limit": limit,
             "exact_titles": self._exact_symbol_titles(query),
+            "filename_query": self._filename_query(query),
         }
         if source_type:
             filters += " AND c.source_type = :source_type"
@@ -95,15 +96,19 @@ class RepositoryRetrievalService:
             statement = text(f"""
                 WITH candidates AS (
                   SELECT c.id AS chunk_id,
-                    ts_rank_cd(to_tsvector('simple', concat_ws(' ', c.title, c.content)), plainto_tsquery('simple', :query)) AS lexical_score,
-                    CASE WHEN lower(c.title) = ANY(CAST(:exact_titles AS text[])) THEN 1.0 ELSE 0.0 END AS exact_title_score
+                    ts_rank_cd(to_tsvector('simple', concat_ws(' ', c.path, c.title, c.content)), plainto_tsquery('simple', :query)) AS lexical_score,
+                    CASE WHEN lower(c.title) = ANY(CAST(:exact_titles AS text[])) THEN 1.0 ELSE 0.0 END AS exact_title_score,
+                    CASE WHEN CAST(:filename_query AS text) IS NOT NULL AND (
+                      lower(c.path) = CAST(:filename_query AS text)
+                      OR lower(regexp_replace(c.path, '^.*/', '')) = CAST(:filename_query AS text)
+                    ) THEN 1.0 ELSE 0.0 END AS exact_path_score
                   FROM repository_chunks c
                   WHERE {filters}
                 )
                 SELECT chunk_id, lexical_score, NULL::float AS vector_score,
-                       (lexical_score + exact_title_score) AS score
+                       (lexical_score + exact_title_score + exact_path_score) AS score
                 FROM candidates
-                WHERE lexical_score > 0 OR exact_title_score > 0
+                WHERE lexical_score > 0 OR exact_title_score > 0 OR exact_path_score > 0
                 ORDER BY score DESC, chunk_id
                 LIMIT :limit
             """)
@@ -112,8 +117,12 @@ class RepositoryRetrievalService:
             statement = text(f"""
                 WITH candidates AS (
                   SELECT c.id AS chunk_id,
-                    ts_rank_cd(to_tsvector('simple', concat_ws(' ', c.title, c.content)), plainto_tsquery('simple', :query)) AS lexical_score,
+                    ts_rank_cd(to_tsvector('simple', concat_ws(' ', c.path, c.title, c.content)), plainto_tsquery('simple', :query)) AS lexical_score,
                     CASE WHEN lower(c.title) = ANY(CAST(:exact_titles AS text[])) THEN 1.0 ELSE 0.0 END AS exact_title_score,
+                    CASE WHEN CAST(:filename_query AS text) IS NOT NULL AND (
+                      lower(c.path) = CAST(:filename_query AS text)
+                      OR lower(regexp_replace(c.path, '^.*/', '')) = CAST(:filename_query AS text)
+                    ) THEN 1.0 ELSE 0.0 END AS exact_path_score,
                     1 - (e.embedding <=> CAST(:query_vector AS vector)) AS vector_score
                   FROM repository_chunks c
                   LEFT JOIN repository_chunk_embeddings e
@@ -121,9 +130,9 @@ class RepositoryRetrievalService:
                   WHERE {filters}
                 )
                 SELECT chunk_id, lexical_score, vector_score,
-                  (0.25 * lexical_score + 0.55 * COALESCE(vector_score, 0) + 0.40 * exact_title_score) AS score
+                  (0.25 * lexical_score + 0.55 * COALESCE(vector_score, 0) + 0.40 * exact_title_score + 0.65 * exact_path_score) AS score
                 FROM candidates
-                WHERE lexical_score > 0 OR vector_score IS NOT NULL OR exact_title_score > 0
+                WHERE lexical_score > 0 OR vector_score IS NOT NULL OR exact_title_score > 0 OR exact_path_score > 0
                 ORDER BY score DESC, chunk_id
                 LIMIT :limit
             """)
@@ -139,3 +148,11 @@ class RepositoryRetrievalService:
             term.lower() for term in terms
             if "_" in term or any(character.isupper() for character in term[1:])
         ))
+
+    @staticmethod
+    def _filename_query(query: str) -> str | None:
+        """Return a standalone filename or path query for an exact path boost."""
+        candidate = query.strip().lower()
+        if re.fullmatch(r"[^\s/]+(?:/[^\s/]+)*\.[a-z0-9_-]+", candidate):
+            return candidate
+        return None

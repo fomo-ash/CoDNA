@@ -16,8 +16,6 @@ export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [tokenInput, setTokenInput] = useState("");
   const [loginError, setLoginError] = useState("");
   const [isValidating, setIsValidating] = useState(false);
 
@@ -60,39 +58,10 @@ export default function Home() {
     } catch (err: any) {
       console.error("OAuth init failed:", err);
       setLoginError(err.message || "Failed to initialize GitHub OAuth flow.");
-      setIsLoginModalOpen(true);
+      alert(err.message || "Failed to start GitHub sign-in. Please try again.");
     } finally {
       setIsValidating(false);
     }
-  };
-
-  const handleTokenSubmit = async (e?: React.FormEvent, customToken?: string) => {
-    if (e) e.preventDefault();
-    const tokenToUse = customToken || tokenInput;
-    if (!tokenToUse.trim()) return;
-
-    setIsValidating(true);
-    setLoginError("");
-
-    try {
-      localStorage.setItem("codedna_jwt", tokenToUse.trim());
-      const currentUser = await api.getCurrentUser();
-
-      setUser(currentUser);
-      setIsLoginModalOpen(false);
-      router.push("/dashboard");
-    } catch (err: any) {
-      setLoginError(err.message || "Invalid access token. Please check and try again.");
-      localStorage.removeItem("codedna_jwt");
-    } finally {
-      setIsValidating(false);
-    }
-  };
-
-  const handleUseMockToken = () => {
-    const mockToken = "mock_codedna_jwt_token_123456";
-    setTokenInput(mockToken);
-    handleTokenSubmit(undefined, mockToken);
   };
 
 
@@ -156,7 +125,7 @@ export default function Home() {
           </div>
 
           <button
-            onClick={() => setIsLoginModalOpen(true)}
+            onClick={handleLoginStart}
             className="relative z-10 text-[13px] text-slate-gray hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer mb-[64px]"
           >
             Or authenticate with access token / launch demo mode
@@ -272,78 +241,9 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* Authentication Modal / Token Pasting Modal */}
-      {isLoginModalOpen && (
-        <div className="fixed inset-0 bg-ink-black/45 backdrop-blur-[2px] flex items-center justify-center z-50 p-[16px]">
-          <div className="bg-paper-white w-full max-w-[480px] rounded-cards p-[24px] shadow-subtle-2 border border-ink-black/[0.06] animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-[16px] border-b border-mist-gray pb-[12px]">
-              <h3 className="text-[20px] font-sohne font-w500 text-ink-black">
-                GitHub Authorization
-              </h3>
-              <button
-                onClick={() => setIsLoginModalOpen(false)}
-                className="w-[32px] h-[32px] rounded-full flex items-center justify-center hover:bg-mist-gray text-slate-gray hover:text-ink-black transition-colors"
-              >
-                &times;
-              </button>
-            </div>
-
-            <p className="text-[15px] font-sohne text-slate-gray leading-relaxed mb-[24px]">
-              Please enter your CoDNA Access Token below to authenticate. You can also bypass authentication and launch the interactive dashboard immediately by choosing Instant Demo Mode.
-            </p>
-
-            <form onSubmit={handleTokenSubmit} className="space-y-[16px]">
-              <div>
-                <label className="text-[13px] font-sohne font-w500 text-ash-gray uppercase tracking-wider block mb-[8px]">
-                  CoDNA Access Token
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIs..."
-                  className="w-full bg-fog-white border border-ink-black/[0.1] rounded-inputs px-[16px] py-[12px] text-[14px] font-mono text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black transition-all"
-                />
-              </div>
-
-              {loginError && (
-                <div className="bg-red-50 text-red-600 p-[12px] rounded-xl text-xs font-sohne">
-                  {loginError}
-                </div>
-              )}
-
-              <div className="flex flex-col gap-[8px] pt-[8px]">
-                <button
-                  type="button"
-                  onClick={handleUseMockToken}
-                  className="w-full h-[44px] rounded-buttons bg-blush-peach text-sienna-brown border border-sienna-brown/20 hover:bg-blush-peach/80 active:scale-[0.98] transition-all text-[14px] font-w500 flex items-center justify-center cursor-pointer"
-                >
-                  🚀 Instant Demo Mode (Use Mock Token)
-                </button>
-                
-                <div className="flex items-center justify-end gap-[12px] mt-[8px]">
-                  <button
-                    type="button"
-                    onClick={() => setIsLoginModalOpen(false)}
-                    className="h-[40px] px-[16px] rounded-buttons bg-transparent border border-mist-gray text-slate-gray hover:text-ink-black transition-colors text-[14px]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isValidating}
-                    className="h-[40px] px-[20px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-[0.98] transition-all text-[14px] font-w500 flex items-center justify-center min-w-[120px]"
-                  >
-                    {isValidating ? (
-                      <span className="w-[16px] h-[16px] rounded-full border border-white border-t-transparent animate-spin mr-[8px]" />
-                    ) : null}
-                    {isValidating ? "Validating..." : "Complete Login"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
+      {loginError && (
+        <div className="fixed bottom-6 left-1/2 z-50 w-[min(92vw,520px)] -translate-x-1/2 rounded-cards border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700 shadow-subtle-2">
+          {loginError}
         </div>
       )}
     </div>

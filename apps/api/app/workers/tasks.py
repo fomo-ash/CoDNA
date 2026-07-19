@@ -22,6 +22,8 @@ from app.db.models.repository_relationship_edge import RepositoryRelationshipEdg
 from app.db.models.user import User
 from app.modules.files.discovery import RepositoryFileDiscoveryService
 from app.modules.files.service import RepositoryFileServiceImpl
+from app.modules.github.client import GitHubAPIError, GitHubClient
+from app.modules.history.service import RepositoryHistoryService
 from app.modules.chunks.service import RepositoryChunkServiceImpl
 from app.modules.embeddings.service import RepositoryChunkEmbeddingService
 from app.modules.jobs.enums import JobStatus
@@ -161,6 +163,26 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
                 )
             else:
                 logger.info("repository index unchanged job_id=%s repository_id=%s", job_id, repository_id)
+
+            if repository.visibility == "private" and not (user and user.github_access_token):
+                logger.info("repository history ingestion skipped: private repository is not authorized")
+            else:
+                try:
+                    history_count = await RepositoryHistoryService(GitHubClient(settings)).refresh(
+                        session,
+                        repository.id,
+                        repository.full_name,
+                        user.github_access_token if user else None,
+                    )
+                    logger.info(
+                        "repository history ingestion completed job_id=%s repository_id=%s artifacts=%s",
+                        job_id, repository_id, history_count,
+                    )
+                except (GitHubAPIError, ValueError) as exc:
+                    logger.warning(
+                        "repository history ingestion skipped job_id=%s repository_id=%s reason=%s",
+                        job_id, repository_id, str(exc),
+                    )
 
             job.status = JobStatus.COMPLETED
             completed_at = datetime.now(UTC)

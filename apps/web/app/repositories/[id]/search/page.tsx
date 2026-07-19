@@ -4,7 +4,7 @@ import React, { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import api from "../../../../lib/api";
-import { User, Repository, RepositorySearchResult, RepositorySearchResponse } from "../../../../types/api";
+import { User, Repository, RepositoryQuestionResponse, RepositorySearchResult, RepositorySearchResponse } from "../../../../types/api";
 import Header from "../../../../components/Header";
 
 interface PageProps {
@@ -31,11 +31,18 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
   const [searchError, setSearchError] = useState("");
   const [searched, setSearched] = useState(false);
   const [vectorSearchUsed, setVectorSearchUsed] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [impactPath, setImpactPath] = useState("");
+  const [impactDepth, setImpactDepth] = useState(2);
+  const [answer, setAnswer] = useState<RepositoryQuestionResponse | null>(null);
+  const [isAsking, setIsAsking] = useState(false);
+  const [answerError, setAnswerError] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("codedna_jwt");
     if (!token) {
-      router.push("/");
+      setIsLoading(false);
+      router.replace("/");
       return;
     }
 
@@ -94,11 +101,41 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
     executeSearch(queryInput, sourceType, chunkType, limit);
   };
 
+  const handleQuestionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!question.trim()) return;
+    setIsAsking(true); setAnswerError("");
+    try {
+      const response = await (api as any).askRepositoryQuestion(repositoryId, {
+        question, impact_path: impactPath || undefined, impact_depth: impactDepth,
+      });
+      setAnswer(response);
+    } catch (err: any) {
+      setAnswerError(err.message || "Question answering is unavailable. Please try again.");
+    } finally { setIsAsking(false); }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("codedna_jwt");
     setUser(null);
     router.push("/");
   };
+
+  const renderAnswer = (answerText: string) => answerText
+    .trim()
+    .split(/\n{2,}/)
+    .map((block, index) => {
+      const lines = block.split("\n").filter(Boolean);
+      const heading = lines.length === 1 && /^#{1,3}\s+/.test(lines[0]);
+      const bullets = lines.every((line) => /^[-*]\s+/.test(line));
+      if (heading) {
+        return <h3 key={index} className="mt-6 first:mt-0 text-[16px] font-w500 text-ink-black">{lines[0].replace(/^#{1,3}\s+/, "")}</h3>;
+      }
+      if (bullets) {
+        return <ul key={index} className="mt-3 list-disc space-y-1.5 pl-5 text-[14px] leading-6 text-ink-black">{lines.map((line, itemIndex) => <li key={itemIndex}>{line.replace(/^[-*]\s+/, "")}</li>)}</ul>;
+      }
+      return <p key={index} className="mt-3 first:mt-0 text-[14px] leading-6 text-ink-black">{lines.join(" ")}</p>;
+    });
 
   if (isLoading) {
     return (
@@ -157,7 +194,7 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
             <input
               type="text"
               required
-              placeholder="Enter search terms, class names, or function signatures..."
+              placeholder="Search concepts, symbols, or file names (for example, app.py)..."
               value={queryInput}
               onChange={(e) => setQueryInput(e.target.value)}
               className="flex-1 bg-paper-white border border-ink-black/[0.1] rounded-inputs px-4 py-2.5 text-[14px] font-sohne text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black transition-all shadow-sm"
@@ -217,6 +254,52 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
             </div>
           </div>
         </form>
+
+        <section className="mb-8 bg-fog-white border border-ink-black/[0.05] p-5 rounded-cards text-left">
+          <div className="mb-4">
+            <span className="text-[12px] font-w500 text-ash-gray uppercase tracking-wider">Repository Q&A</span>
+            <p className="text-[13px] text-slate-gray mt-1">Ask about indexed code. Add an impact path only for dependency analysis.</p>
+          </div>
+          <form onSubmit={handleQuestionSubmit} className="space-y-3">
+            <textarea required value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What does this repository do?" className="w-full min-h-24 bg-paper-white border border-ink-black/[0.1] rounded-inputs px-4 py-3 text-[14px]" />
+            <div className="flex flex-col md:flex-row gap-3">
+              <input value={impactPath} onChange={(e) => setImpactPath(e.target.value)} placeholder="Optional impact path, e.g. src/app.py" className="flex-1 bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px]" />
+              <select value={impactDepth} onChange={(e) => setImpactDepth(Number(e.target.value))} className="bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px]">
+                <option value={1}>Direct impact</option><option value={2}>Depth 2</option><option value={3}>Depth 3</option>
+              </select>
+              <button type="submit" disabled={isAsking} className="px-5 py-2 rounded-buttons bg-ink-black text-paper-white text-[14px] disabled:opacity-70">{isAsking ? "Answering..." : "Ask"}</button>
+            </div>
+          </form>
+          {answerError && <p className="mt-4 text-sm text-red-600">{answerError}</p>}
+          {answer && (
+            <div className="mt-6 border-t border-mist-gray pt-5">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-w500 uppercase tracking-wider">
+                <span className="rounded-buttons bg-ink-black px-2.5 py-1 text-paper-white">Answer</span>
+                <span className="rounded-buttons border border-mist-gray bg-paper-white px-2.5 py-1 text-ash-gray">{answer.cached ? "Cached" : "Fresh"}</span>
+                <span className={`rounded-buttons px-2.5 py-1 ${answer.vector_search_used ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{answer.vector_search_used ? "Hybrid evidence" : "Lexical evidence"}</span>
+              </div>
+              <article className="mt-4 rounded-xl border border-ink-black/[0.06] bg-paper-white p-5 shadow-subtle">
+                {renderAnswer(answer.answer)}
+              </article>
+              {answer.citations.length > 0 && (
+                <div className="mt-5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider">Evidence</span>
+                    <span className="text-[12px] text-slate-gray">Open a record to inspect the exact indexed chunk.</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {answer.citations.map((citation) => (
+                      <Link key={citation.chunk_id} href={`/repositories/${repo.id}?tab=chunks&chunkId=${citation.chunk_id}`} className="rounded-lg border border-mist-gray bg-paper-white px-3 py-2 text-[12px] text-ink-black transition-colors hover:bg-fog-white">
+                        <span className="mr-2 font-mono text-ash-gray">[{citation.index}]</span>
+                        <span className="font-mono break-all">{citation.path}:{citation.start_line ?? 1}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
         {/* Results layout */}
         <div className="space-y-4 text-left">

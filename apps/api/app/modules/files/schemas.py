@@ -16,7 +16,6 @@ class RepositoryFileRead(BaseModel):
     extension: str | None
     language: str | None
     size_bytes: int
-    sha256: str
     is_binary: bool
     discovered_at: datetime
     created_at: datetime

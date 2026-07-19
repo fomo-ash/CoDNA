@@ -22,8 +22,8 @@ import {
 
 const API_BASE_URL = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001") : "http://localhost:8001";
 
-// For mockup, we default to mock mode to make the app fully interactive immediately.
-const USE_MOCK = true;
+// Use the real API and GitHub OAuth flow in local development and deployment.
+const USE_MOCK = false;
 
 // --- Mock State Store (in localStorage) ---
 const MOCK_STORAGE_KEY = "codna_mock_db";
@@ -262,6 +262,16 @@ const mockApi = {
     return newRepo;
   },
 
+  retryRepositoryEmbeddings: async (id: string): Promise<Repository> => {
+    const db = getMockDB();
+    const repository = db.importedRepos.find((item) => item.id === id);
+    if (!repository) throw new Error("Repository not found");
+    repository.embedding_status = "completed";
+    repository.embedding_error_message = null;
+    saveMockDB(db);
+    return repository;
+  },
+
   getImportedRepositories: async (): Promise<Repository[]> => {
     const db = getMockDB();
     return db.importedRepos;
@@ -346,7 +356,6 @@ const mockApi = {
       extension: f.path.split(".").pop() || "",
       language: f.lang,
       size_bytes: f.size,
-      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       is_binary: f.lang === "Binary",
       discovered_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -781,6 +790,11 @@ const mockApi = {
     };
   },
 
+  getRepositoryHistory: async (id: string): Promise<import("../types/api").RepositoryHistoryListResponse> => ({
+    repository_id: id,
+    artifacts: [],
+  }),
+
   getChunk: async (chunkId: string): Promise<RepositoryChunkRead> => {
     const repoId = chunkId.split("-chunk-")[0] || "codna-core";
     const chunksRes = await mockApi.getRepositoryChunks(repoId);
@@ -906,6 +920,10 @@ export const api = USE_MOCK ? mockApi : {
     });
   },
 
+  retryRepositoryEmbeddings: async (id: string): Promise<Repository> => {
+    return request<Repository>(`/repositories/${id}/embeddings/retry`, { method: "POST" });
+  },
+
   getImportedRepositories: async (): Promise<Repository[]> => {
     return request<Repository[]>("/repositories");
   },
@@ -1011,6 +1029,10 @@ export const api = USE_MOCK ? mockApi : {
     return request<RepositoryChunkListResponse>(`/repositories/${id}/chunks?${searchParams.toString()}`);
   },
 
+  getRepositoryHistory: async (id: string): Promise<import("../types/api").RepositoryHistoryListResponse> => {
+    return request(`/repositories/${id}/history`);
+  },
+
   getChunk: async (chunkId: string): Promise<RepositoryChunkRead> => {
     return request<RepositoryChunkRead>(`/chunks/${chunkId}`);
   },
@@ -1031,6 +1053,16 @@ export const api = USE_MOCK ? mockApi : {
     if (params.limit) searchParams.append("limit", String(params.limit));
 
     return request<RepositorySearchResponse>(`/repositories/${id}/search?${searchParams.toString()}`);
+  },
+
+  askRepositoryQuestion: async (
+    id: string,
+    payload: { question: string; impact_path?: string; impact_depth?: number }
+  ): Promise<import("../types/api").RepositoryQuestionResponse> => {
+    return request(`/repositories/${id}/questions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 };
 

@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [isGithubLoading, setIsGithubLoading] = useState(false);
   const [githubPage, setGithubPage] = useState(1);
   const [hasNextGithubPage, setHasNextGithubPage] = useState(false);
+  const [publicRepoName, setPublicRepoName] = useState("");
+  const [isPublicImporting, setIsPublicImporting] = useState(false);
 
   // Indexing status mapping (job_id -> status/info)
   const [activeJobs, setActiveJobs] = useState<Record<string, { repoId: string; status: string; error?: string }>>({});
@@ -37,7 +39,8 @@ export default function Dashboard() {
     const fetchProfile = async () => {
       const token = localStorage.getItem("codedna_jwt");
       if (!token) {
-        router.push("/");
+        setIsLoading(false);
+        router.replace("/");
         return;
       }
       try {
@@ -77,7 +80,9 @@ export default function Dashboard() {
 
       pollingRef.current = setInterval(async () => {
         const hasActiveJobs = importedRepos.some(
-          (r) => r.status === "cloning" || r.status === "indexing" || r.status === "registered" && activeJobs[r.id]
+          (r) => r.status === "cloning" || r.status === "indexing" ||
+            (r.status === "registered" && Boolean(activeJobs[r.id])) ||
+            r.embedding_status === "pending" || r.embedding_status === "running"
         );
 
         if (hasActiveJobs || Object.keys(activeJobs).length > 0) {
@@ -174,6 +179,27 @@ export default function Dashboard() {
     }
   };
 
+  const handlePublicRepositoryImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const fullName = publicRepoName.trim();
+    if (!/^[^/\s]+\/[^/\s]+$/.test(fullName)) {
+      alert("Enter a GitHub repository as owner/repository.");
+      return;
+    }
+
+    setIsPublicImporting(true);
+    try {
+      await api.importRepository({ full_name: fullName });
+      setPublicRepoName("");
+      await fetchImportedRepositories();
+      setActiveTab("my-repos");
+    } catch (err: any) {
+      alert(err.message || `Failed to import ${fullName}`);
+    } finally {
+      setIsPublicImporting(false);
+    }
+  };
+
   const handleStartIndexing = async (repoId: string) => {
     try {
       const response = await api.startIndexing(repoId);
@@ -189,6 +215,15 @@ export default function Dashboard() {
       );
     } catch (err: any) {
       alert(err.message || "Failed to start indexing.");
+    }
+  };
+
+  const handleRetryEmbeddings = async (repoId: string) => {
+    try {
+      await api.retryRepositoryEmbeddings(repoId);
+      await fetchImportedRepositories();
+    } catch (err: any) {
+      alert(err.message || "Failed to retry embeddings.");
     }
   };
 
@@ -211,6 +246,13 @@ export default function Dashboard() {
       default:
         return "bg-mist-gray text-ink-black";
     }
+  };
+
+  const getEmbeddingStatusClass = (status?: Repository["embedding_status"]) => {
+    if (status === "completed") return "bg-emerald-50 text-emerald-700 border border-emerald-200/50";
+    if (status === "failed") return "bg-red-50 text-red-700 border border-red-200/50";
+    if (status === "running" || status === "pending") return "bg-amber-50 text-amber-700 border border-amber-200/50 animate-pulse";
+    return "bg-mist-gray text-slate-gray border border-ink-black/[0.05]";
   };
 
   if (isLoading) {
@@ -361,6 +403,21 @@ export default function Dashboard() {
                                     {jobError}
                                   </div>
                                 )}
+                                <div className="mt-[6px] flex items-center gap-2">
+                                  <span className={`px-[8px] py-[3px] text-[10px] font-w500 rounded-buttons uppercase tracking-wider ${getEmbeddingStatusClass(repo.embedding_status)}`}>
+                                    embeddings {repo.embedding_status || "not started"}{repo.embedding_chunk_count ? ` · ${repo.embedding_chunk_count}` : ""}
+                                  </span>
+                                  {repo.embedding_status === "failed" && (
+                                    <button onClick={() => handleRetryEmbeddings(repo.id)} className="text-[11px] text-red-700 hover:underline">
+                                      Retry embeddings
+                                    </button>
+                                  )}
+                                </div>
+                                {repo.embedding_status === "failed" && repo.embedding_error_message && (
+                                  <div className="text-[11px] text-red-500 mt-[4px] max-w-[200px] truncate" title={repo.embedding_error_message}>
+                                    {repo.embedding_error_message}
+                                  </div>
+                                )}
                               </td>
                               <td className="py-[16px] px-[16px] text-[15px] text-slate-gray font-mono">
                                 {repo.default_branch}
@@ -454,6 +511,14 @@ export default function Dashboard() {
                             {jobError}
                           </div>
                         )}
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className={`px-[8px] py-[3px] font-w500 rounded-buttons uppercase tracking-wider ${getEmbeddingStatusClass(repo.embedding_status)}`}>
+                            embeddings {repo.embedding_status || "not started"}{repo.embedding_chunk_count ? ` · ${repo.embedding_chunk_count}` : ""}
+                          </span>
+                          {repo.embedding_status === "failed" && (
+                            <button onClick={() => handleRetryEmbeddings(repo.id)} className="text-red-700 hover:underline">Retry embeddings</button>
+                          )}
+                        </div>
 
                         <div className="flex items-center justify-between">
                           <span className="text-[13px] text-slate-gray capitalize">{repo.visibility}</span>
@@ -612,6 +677,34 @@ export default function Dashboard() {
                 )}
               </div>
             )}
+
+            <form onSubmit={handlePublicRepositoryImport} className="bg-fog-white border border-ink-black/[0.05] p-5 rounded-cards">
+              <div className="flex flex-col md:flex-row md:items-end gap-4">
+                <div className="flex-1">
+                  <label htmlFor="public-repository" className="text-[12px] font-w500 text-ash-gray uppercase tracking-wider block mb-2">
+                    Import a public repository
+                  </label>
+                  <input
+                    id="public-repository"
+                    type="text"
+                    value={publicRepoName}
+                    onChange={(event) => setPublicRepoName(event.target.value)}
+                    placeholder="owner/repository"
+                    className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-4 py-2.5 text-[14px] font-sohne text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black transition-all"
+                  />
+                  <p className="mt-2 text-[13px] text-slate-gray">
+                    Public repositories can be indexed directly. Fork only if you want your own editable copy.
+                  </p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isPublicImporting}
+                  className="h-[42px] px-5 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 text-[14px] font-w500 active:scale-95 transition-all disabled:opacity-75"
+                >
+                  {isPublicImporting ? "Importing..." : "Import Public Repo"}
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </main>

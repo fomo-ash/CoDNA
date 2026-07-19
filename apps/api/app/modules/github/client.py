@@ -73,6 +73,28 @@ class GitHubClient:
         response = await self._request("GET", url, access_token=access_token)
         return self._json(response)
 
+    async def list_repository_history(
+        self,
+        access_token: str,
+        *,
+        full_name: str,
+        artifact_type: str,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        endpoint = {
+            "commit": "commits",
+            "pull_request": "pulls",
+            "issue": "issues",
+        }[artifact_type]
+        response = await self._request(
+            "GET",
+            f"{self.settings.github_api_url}/repos/{quote(full_name, safe='/')}/{endpoint}",
+            access_token=access_token,
+            params={"state": "all", "per_page": per_page},
+        )
+        payload = self._json(response)
+        return payload if isinstance(payload, list) else []
+
     @staticmethod
     def _json(response: httpx.Response) -> dict[str, Any] | list[dict[str, Any]]:
         try:

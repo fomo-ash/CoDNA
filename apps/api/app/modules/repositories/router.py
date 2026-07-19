@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.dependencies import get_db_session
@@ -15,7 +16,11 @@ from app.modules.github.service import (
     GitHubRepositoryNotFoundError,
     GitHubServiceImpl,
 )
-from app.modules.jobs.dependencies import get_job_service, get_repository_index_task
+from app.modules.jobs.dependencies import (
+    get_job_service,
+    get_repository_embedding_task,
+    get_repository_index_task,
+)
 from app.modules.jobs.interfaces import JobService
 from app.modules.jobs.schemas import RepositoryIndexJobResponse
 from app.modules.jobs.service import JobRepositoryNotFoundError
@@ -23,6 +28,7 @@ from app.modules.repositories.dependencies import get_repository_service
 from app.modules.repositories.interfaces import RepositoryService
 from app.modules.repositories.schemas import RepositoryImportRequest, RepositoryRead
 from app.modules.repositories.service import RepositoryAlreadyExistsError, RepositoryNotFoundError
+from app.db.models.repository import Repository
 
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -130,3 +136,48 @@ async def index_repository(
         job_id=job.id,
         status=job.status,
     )
+
+
+@router.post(
+    "/{repository_id}/embeddings/retry",
+    response_model=RepositoryRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_repository_embeddings(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user_record),
+    session: AsyncSession = Depends(get_db_session),
+    embedding_task=Depends(get_repository_embedding_task),
+) -> RepositoryRead:
+    repository = await session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.owner_id == current_user.id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+    if repository.embedding_status != "failed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Embeddings can only be retried after a failed run.",
+        )
+
+    repository.embedding_status = "pending"
+    repository.embedding_chunk_count = 0
+    repository.embedding_error_message = None
+    repository.embedding_started_at = None
+    repository.embedding_completed_at = None
+    await session.commit()
+    await session.refresh(repository)
+    try:
+        embedding_task.delay(str(repository.id))
+    except Exception as exc:
+        repository.embedding_status = "failed"
+        repository.embedding_error_message = "Failed to enqueue the embedding retry."
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to enqueue the embedding retry.",
+        ) from exc
+    return RepositoryRead.model_validate(repository)
