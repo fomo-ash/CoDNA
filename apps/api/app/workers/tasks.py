@@ -172,6 +172,12 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
                 await session.execute(
                     delete(RepositoryQuestionCache).where(RepositoryQuestionCache.repository_id == repository.id)
                 )
+                if _embedding_provider_configured(settings):
+                    repository.embedding_status = "pending"
+                    repository.embedding_chunk_count = 0
+                    repository.embedding_error_message = None
+                    repository.embedding_started_at = None
+                    repository.embedding_completed_at = None
             await session.commit()
         # Embeddings are deliberately a separate job: the index stays usable even if
         # a provider is unavailable, and this task reads repository_chunks only.
@@ -187,7 +193,33 @@ async def _run_repository_index(job_id: UUID, repository_id: UUID) -> None:
 async def _embed_repository_chunks(repository_id: UUID) -> None:
     settings = get_settings()
     async with worker_session() as session:
-        result = await RepositoryChunkEmbeddingService(settings).embed_repository_chunks(session, repository_id)
+        repository = await session.get(Repository, repository_id)
+        if repository is None:
+            raise RuntimeError("Repository was not found for embedding.")
+        repository.embedding_status = "running"
+        repository.embedding_error_message = None
+        repository.embedding_started_at = datetime.now(UTC)
+        repository.embedding_completed_at = None
+        await session.commit()
+    try:
+        async with worker_session() as session:
+            result = await RepositoryChunkEmbeddingService(settings).embed_repository_chunks(session, repository_id)
+            repository = await session.get(Repository, repository_id)
+            if repository is None:
+                raise RuntimeError("Repository was not found for embedding.")
+            repository.embedding_status = "completed"
+            repository.embedding_chunk_count = result.embedded + result.skipped
+            repository.embedding_completed_at = datetime.now(UTC)
+            await session.commit()
+    except Exception as exc:
+        async with worker_session() as session:
+            repository = await session.get(Repository, repository_id)
+            if repository is not None:
+                repository.embedding_status = "failed"
+                repository.embedding_error_message = str(exc)
+                repository.embedding_completed_at = datetime.now(UTC)
+                await session.commit()
+        raise
     logger.info(
         "repository chunk embedding completed repository_id=%s embedded=%s skipped=%s",
         repository_id, result.embedded, result.skipped,

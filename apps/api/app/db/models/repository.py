@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,3 +42,8 @@ class Repository(TimestampedUUIDModel):
     last_cloned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_indexed_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    embedding_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    embedding_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    embedding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

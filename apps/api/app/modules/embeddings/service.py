@@ -101,6 +101,12 @@ class EmbeddingRunResult:
 
 
 class RepositoryChunkEmbeddingService:
+    # This stays well below the 8,192-token per-input limit of the embedding API,
+    # including for token-dense source code. Full chunk content remains persisted
+    # for lexical search and citations.
+    MAX_EMBEDDING_INPUT_CHARACTERS = 12_000
+    TRUNCATION_MARKER = "\n\n[Embedding input truncated]"
+
     def __init__(self, settings: Settings, provider: EmbeddingProvider | None = None) -> None:
         self.settings = settings
         self.provider = provider
@@ -112,6 +118,15 @@ class RepositoryChunkEmbeddingService:
     @staticmethod
     def source_hash(chunk: RepositoryChunk) -> str:
         return hashlib.sha256(RepositoryChunkEmbeddingService.source_text(chunk).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def embedding_text(cls, chunk: RepositoryChunk) -> str:
+        """Return a provider-safe representation without changing stored chunk content."""
+        text = cls.source_text(chunk)
+        if len(text) <= cls.MAX_EMBEDDING_INPUT_CHARACTERS:
+            return text
+        limit = cls.MAX_EMBEDDING_INPUT_CHARACTERS - len(cls.TRUNCATION_MARKER)
+        return f"{text[:limit]}{cls.TRUNCATION_MARKER}"
 
     def _provider(self) -> EmbeddingProvider:
         if self.provider is not None:
@@ -156,7 +171,7 @@ class RepositoryChunkEmbeddingService:
         embedded = 0
         for start in range(0, len(pending), self.settings.embedding_batch_size):
             batch = pending[start : start + self.settings.embedding_batch_size]
-            vectors = await provider.embed([self.source_text(chunk) for chunk in batch], task_type="RETRIEVAL_DOCUMENT")
+            vectors = await provider.embed([self.embedding_text(chunk) for chunk in batch], task_type="RETRIEVAL_DOCUMENT")
             for chunk, vector in zip(batch, vectors, strict=True):
                 if len(vector) != self.settings.embedding_dimensions:
                     raise EmbeddingProviderError("Embedding provider returned an unexpected vector dimension.")

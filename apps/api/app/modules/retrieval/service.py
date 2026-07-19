@@ -12,6 +12,7 @@ from app.db.models.repository_chunk import RepositoryChunk
 from app.modules.chunks.schemas import RepositoryChunkRead
 from app.modules.embeddings.service import (
     EmbeddingConfigurationError,
+    EmbeddingProviderError,
     EmbeddingProvider,
     GoogleEmbeddingProvider,
     OpenAIEmbeddingProvider,
@@ -55,7 +56,11 @@ class RepositoryRetrievalService:
         if self.provider is None and not self._configured_provider_key():
             return None
         provider = self.provider or self._provider()
-        vector = (await provider.embed([query], task_type="RETRIEVAL_QUERY"))[0]
+        try:
+            vector = (await provider.embed([query], task_type="RETRIEVAL_QUERY"))[0]
+        except EmbeddingProviderError:
+            # Search remains useful during a provider outage via lexical ranking.
+            return None
         if len(vector) != self.settings.embedding_dimensions:
             raise EmbeddingConfigurationError("Query embedding dimensions do not match configured storage.")
         return vector

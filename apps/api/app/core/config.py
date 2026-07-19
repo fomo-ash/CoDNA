@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 64
     answer_provider: Literal["openai", "google"] = "openai"
     answer_model: str = "gpt-5.4-mini"
-    answer_max_context_chunks: int = 8
-    answer_max_related_chunks: int = 4
+    answer_max_context_chunks: int = 5
+    answer_max_related_chunks: int = 0
     answer_max_context_characters: int = 18000
     answer_max_output_tokens: int = 1600
     answer_budget_usd: Decimal = Decimal("4.00")

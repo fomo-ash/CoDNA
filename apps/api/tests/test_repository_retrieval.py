@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.modules.chunks.schemas import RepositoryChunkRead
-from app.modules.embeddings.service import RepositoryChunkEmbeddingService
+from app.modules.embeddings.service import EmbeddingProviderError, RepositoryChunkEmbeddingService
 from app.modules.repositories.service import RepositoryNotFoundError
 from app.modules.retrieval.router import search_repository
 from app.modules.retrieval.schemas import RepositorySearchResponse, RepositorySearchResult
@@ -28,10 +28,33 @@ def test_embedding_hash_tracks_the_searchable_chunk_content() -> None:
     assert RepositoryChunkEmbeddingService.source_text(first) == "authenticate\n\nvalidate the JWT"
 
 
+def test_embedding_text_truncates_only_the_provider_input() -> None:
+    chunk = SimpleNamespace(title="large", content="x" * 12_100)
+
+    embedding_text = RepositoryChunkEmbeddingService.embedding_text(chunk)
+
+    assert len(embedding_text) == RepositoryChunkEmbeddingService.MAX_EMBEDDING_INPUT_CHARACTERS
+    assert embedding_text.endswith(RepositoryChunkEmbeddingService.TRUNCATION_MARKER)
+    assert RepositoryChunkEmbeddingService.source_text(chunk).endswith("x" * 12_100)
+
+
 def test_exact_symbol_titles_identifies_code_symbols_only() -> None:
     assert RepositoryRetrievalService._exact_symbol_titles("Where is StudentLifeEnv defined?") == ["studentlifeenv"]
     assert RepositoryRetrievalService._exact_symbol_titles("How does parse_file work?") == ["parse_file"]
     assert RepositoryRetrievalService._exact_symbol_titles("How is the environment related?") == []
+
+
+def test_query_embedding_failure_falls_back_to_lexical_search() -> None:
+    class FailingEmbeddingProvider:
+        async def embed(self, inputs, task_type=None):
+            del inputs, task_type
+            raise EmbeddingProviderError("provider unavailable")
+
+    service = RepositoryRetrievalService(
+        SimpleNamespace(embedding_dimensions=1536), FailingEmbeddingProvider()
+    )
+
+    assert asyncio.run(service._query_vector("authentication")) is None
 
 
 class FakeRetrievalService:

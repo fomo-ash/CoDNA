@@ -38,5 +38,10 @@ class RepositoryRead(RepositoryBase):
     github_id: str | None
     last_cloned_at: datetime | None
     last_indexed_at: datetime | None
+    embedding_status: str
+    embedding_chunk_count: int
+    embedding_error_message: str | None
+    embedding_started_at: datetime | None
+    embedding_completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
