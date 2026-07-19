@@ -7,6 +7,7 @@ from app.db.models.repository_chunk import RepositoryChunk
 from app.db.models.repository_chunk_embedding import RepositoryChunkEmbedding
 from app.db.models.repository_answer_usage import RepositoryAnswerUsage
 from app.db.models.repository_question_cache import RepositoryQuestionCache
+from app.db.models.repository_relationship_edge import RepositoryRelationshipEdge
 from app.db.models.repository_statistics import RepositoryStatistics
 from app.db.models.user import User
 
@@ -20,6 +21,7 @@ __all__ = [
     "RepositoryChunkEmbedding",
     "RepositoryAnswerUsage",
     "RepositoryQuestionCache",
+    "RepositoryRelationshipEdge",
     "RepositoryStatistics",
     "User",
 ]

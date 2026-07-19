@@ -7,6 +7,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.chunks.router import chunk_router, repository_router as chunks_repository_router
 from app.modules.files.router import router as files_router
 from app.modules.github.router import router as github_router
+from app.modules.graph.router import router as graph_router
 from app.modules.jobs.router import router as jobs_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.parsing.router import router as parsing_router
@@ -27,4 +28,5 @@ api_router.include_router(knowledge_router)
 api_router.include_router(chunks_repository_router)
 api_router.include_router(chunk_router)
 api_router.include_router(retrieval_router)
+api_router.include_router(graph_router)
 api_router.include_router(questions_router)

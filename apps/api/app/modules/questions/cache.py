@@ -20,7 +20,7 @@ class AnswerCache(Protocol):
 
 
 class DatabaseAnswerCache:
-    CACHE_VERSION = "v3"
+    CACHE_VERSION = "v6"
 
     @staticmethod
     def question_hash(question: str) -> str:

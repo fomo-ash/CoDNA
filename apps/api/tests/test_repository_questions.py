@@ -113,6 +113,7 @@ def test_question_uses_bounded_retrieval_and_returns_citations() -> None:
     assert "[1] environment.py:6-12" in provider.prompt
     assert "trace the application's entry point" in provider.prompt
     assert "active execution path" in provider.prompt
+    assert "You are CodeDNA" in provider.prompt
     assert len(usage_tracker.reservations) == 1
     assert usage_tracker.finalized[0][1:3] == (100, 20)
     assert usage_tracker.finalized[0][-1] == "completed"

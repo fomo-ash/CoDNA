@@ -4,7 +4,7 @@
 
 Repository indexing now creates durable inventory, parse results, extracted knowledge items, and repository-aware semantic chunks. Chunks include source content, source ranges, stable identifiers, static-analysis metadata, and deterministic local relationships. Chunk embeddings and owner-scoped hybrid retrieval are available.
 
-The current system intentionally has no graph persistence, repository-history ingestion, or incremental indexing. Repository questions now return citation-first, repository-aware answers with a global spend guard and repeat-question cache.
+Repository relationship metadata is now materialized as repository-scoped graph edges during indexing. Direct graph and path-impact APIs preserve unresolved links explicitly. Repository-history ingestion and incremental indexing remain future work. Repository questions return citation-first, repository-aware answers with a global spend guard and repeat-question cache.
 
 ## Product Positioning and Differentiation
 
@@ -51,8 +51,9 @@ The product must make this promise concrete:
 
 ### 3. Persistent Relationship Graph
 
-- Materialize the existing chunk relationships into graph tables or a graph projection.
-- Add dependency, caller, importer, and impact traversal endpoints.
+- Completed 2026-07-19: materialize imports, calls, references, inheritance, and implementation relationships into `repository_relationship_edges` during indexing.
+- Completed 2026-07-19: add owner-scoped direct graph and path-impact endpoints, preserving unresolved targets as unresolved facts.
+- Next: add bounded multi-hop traversal and symbol-level impact views after representative repository validation.
 - Preserve unresolved and dynamic relationships as probabilistic or unresolved facts rather than asserting them as certain.
 
 ### 4. Incremental Indexing
