@@ -32,3 +32,11 @@ class RepositoryImpactResponse(BaseModel):
     outgoing: list[RelationshipEdgeRead]
     internal: list[RelationshipEdgeRead] = []
     external_dependent_paths: list[str] = []
+
+
+class RepositoryImpactTraversalResponse(BaseModel):
+    repository_id: UUID
+    path: str
+    depth: int
+    affected_paths: list[str]
+    paths: list[list[str]]

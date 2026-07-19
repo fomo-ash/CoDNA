@@ -119,7 +119,9 @@ def test_builder_resolves_repository_local_call_and_import_relationships(tmp_pat
     assert execute.metadata["relationships"]["calls"] == [
         {"symbol": "run", "path": "helpers.py", "stable_symbol_id": "helpers.py::run"}
     ]
-    assert execute.metadata["relationships"]["imports"] == [{"symbol": "helpers", "path": "helpers.py"}]
+    assert execute.metadata["relationships"]["imports"] == [
+        {"symbol": "run", "path": "helpers.py", "stable_symbol_id": "helpers.py::run"}
+    ]
     assert execute.metadata["file_imports"] == [{"source": "helpers", "items": ["helpers", "run"]}]
     assert execute.metadata["used_imports"] == ["run"]
     assert run.metadata["relationships"]["called_by"] == [
@@ -142,6 +144,29 @@ def test_builder_creates_constant_chunks_and_resolves_references(tmp_path) -> No
     assert chunk_by_type["function"].metadata["relationships"]["references"] == [
         {"symbol": "LIMIT", "path": "settings.py", "stable_symbol_id": "settings.py::LIMIT"}
     ]
+
+
+def test_builder_does_not_resolve_unimported_references_to_another_file(tmp_path) -> None:
+    (tmp_path / "environment.py").write_text("def use_tasks():\n    return tasks\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("def tasks():\n    return {}\n", encoding="utf-8")
+    items = [
+        knowledge_item("environment.py", "source_code", "source_file", {"language": "Python"}),
+        knowledge_item("environment.py", "source_code", "symbol", {
+            "name": "use_tasks", "kind": "function", "start_line": 1, "end_line": 2,
+            "stable_symbol_id": "environment.py::use_tasks", "calls": [], "references": ["tasks"],
+            "is_exported": True,
+        }, "use_tasks"),
+        knowledge_item("main.py", "source_code", "source_file", {"language": "Python"}),
+        knowledge_item("main.py", "source_code", "symbol", {
+            "name": "tasks", "kind": "function", "start_line": 1, "end_line": 2,
+            "stable_symbol_id": "main.py::tasks", "calls": [], "references": [], "is_exported": True,
+        }, "tasks"),
+    ]
+
+    chunks = SemanticChunkBuilder().build(tmp_path, items)
+    use_tasks = next(chunk for chunk in chunks if chunk.title == "use_tasks")
+
+    assert use_tasks.metadata["relationships"]["references"] == [{"symbol": "tasks"}]
 
 
 class FakeChunkEndpointService:

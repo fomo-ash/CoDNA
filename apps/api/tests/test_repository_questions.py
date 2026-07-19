@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from app.modules.chunks.schemas import RepositoryChunkRead
 from app.modules.questions.service import AnswerGeneration, AnswerProviderError, RepositoryQuestionService
 from app.modules.questions.schemas import RepositoryAnswerCitation
+from app.modules.graph.schemas import RepositoryImpactTraversalResponse
 from app.modules.retrieval.schemas import RepositorySearchResponse, RepositorySearchResult
 
 
@@ -70,6 +71,27 @@ class FakeAnswerCache:
         self.cached = response
 
 
+class FakeGraphService:
+    async def traverse_impact(self, session, repository_id, owner_id, path, depth):
+        del session, owner_id
+        return RepositoryImpactTraversalResponse(
+            repository_id=repository_id,
+            path=path.strip(),
+            depth=depth,
+            affected_paths=["server/app.py"],
+            paths=[[path.strip(), "main.py", "server/app.py"]],
+        )
+
+
+class FakeSession:
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    async def execute(self, statement):
+        del statement
+        return SimpleNamespace(scalars=lambda: self.chunks)
+
+
 def settings() -> SimpleNamespace:
     return SimpleNamespace(
         answer_max_context_chunks=2,
@@ -113,6 +135,13 @@ def test_question_uses_bounded_retrieval_and_returns_citations() -> None:
     assert "[1] environment.py:6-12" in provider.prompt
     assert "trace the application's entry point" in provider.prompt
     assert "active execution path" in provider.prompt
+    assert "## Direct Impact" in provider.prompt
+    assert "authoritative dependency graph" in provider.prompt
+    assert "primary source of truth for dependency propagation" in provider.prompt
+    assert "always walk every path in order" in provider.prompt
+    assert "Discuss every file listed in affected_paths" in provider.prompt
+    assert "structure the explanation around those exact paths" in provider.prompt
+    assert "never reverse that direction" in provider.prompt
     assert "You are CodeDNA" in provider.prompt
     assert len(usage_tracker.reservations) == 1
     assert usage_tracker.finalized[0][1:3] == (100, 20)
@@ -136,6 +165,27 @@ def test_question_skips_provider_when_no_evidence_exists() -> None:
     assert "could not find enough indexed repository evidence" in response.answer
     assert response.citations == []
     assert provider.prompt is None
+
+
+def test_impact_question_includes_authoritative_traversal_context() -> None:
+    retrieval = FakeRetrievalService([result("main.py", "app")])
+    provider = FakeAnswerProvider()
+    service = RepositoryQuestionService(
+        settings(), retrieval, provider, FakeUsageTracker(), FakeAnswerCache(), FakeGraphService()
+    )
+
+    asyncio.run(service.ask(
+        FakeSession([result("environment.py").chunk]), REPOSITORY_ID, OWNER_ID,
+        "Analyze main.py impact.", "environment.py ", 2
+    ))
+
+    assert "Authoritative impact traversal:" in provider.prompt
+    assert "Path direction: A -> B means B depends on A" in provider.prompt
+    assert "A -> B means B depends on A" in provider.prompt
+    assert "- Target path: environment.py" in provider.prompt
+    assert "- affected_paths: server/app.py" in provider.prompt
+    assert "- environment.py -> main.py -> server/app.py" in provider.prompt
+    assert "only files in the supplied affected_paths are impact candidates" in provider.prompt
 
 
 def test_answer_provider_error_retains_rate_limit_status() -> None:

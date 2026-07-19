@@ -7,11 +7,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.repository import Repository
 from app.db.models.repository_relationship_edge import RepositoryRelationshipEdge
-from app.modules.graph.schemas import RepositoryGraphResponse, RepositoryImpactResponse, RelationshipEdgeRead
+from app.modules.graph.schemas import RepositoryGraphResponse, RepositoryImpactResponse, RepositoryImpactTraversalResponse, RelationshipEdgeRead
 from app.modules.repositories.service import RepositoryNotFoundError
 
 
 class RepositoryGraphService:
+    async def traverse_impact(self, session: AsyncSession, repository_id: UUID, owner_id: UUID, path: str, depth: int) -> RepositoryImpactTraversalResponse:
+        path = self._normalize_path(path)
+        await self._ensure_owner(session, repository_id, owner_id)
+        rows = (await session.scalars(select(RepositoryRelationshipEdge).where(
+            RepositoryRelationshipEdge.repository_id == repository_id, RepositoryRelationshipEdge.resolution == "resolved"
+        ))).all()
+        by_target: dict[str, list[RepositoryRelationshipEdge]] = {}
+        for row in rows:
+            if row.target_path and not self._is_test_path(row.source_path):
+                by_target.setdefault(row.target_path, []).append(row)
+        frontier = [(path, [path])]
+        paths: list[list[str]] = []
+        visited = {path}
+        for _ in range(depth):
+            next_frontier = []
+            for current, chain in frontier:
+                for edge in by_target.get(current, []):
+                    if edge.source_path in visited:
+                        continue
+                    visited.add(edge.source_path)
+                    next_chain = [*chain, edge.source_path]
+                    paths.append(next_chain)
+                    next_frontier.append((edge.source_path, next_chain))
+            frontier = next_frontier
+            if not frontier:
+                break
+        return RepositoryImpactTraversalResponse(repository_id=repository_id, path=path, depth=depth, affected_paths=sorted(visited - {path}), paths=paths)
     async def graph(self, session: AsyncSession, repository_id: UUID, owner_id: UUID, limit: int) -> RepositoryGraphResponse:
         await self._ensure_owner(session, repository_id, owner_id)
         rows = await session.scalars(select(RepositoryRelationshipEdge).where(
@@ -20,6 +47,7 @@ class RepositoryGraphService:
         return RepositoryGraphResponse(repository_id=repository_id, edges=[RelationshipEdgeRead.model_validate(row) for row in rows])
 
     async def impact(self, session: AsyncSession, repository_id: UUID, owner_id: UUID, path: str, limit: int, include_unresolved: bool = False, include_tests: bool = False, include_internal: bool = False) -> RepositoryImpactResponse:
+        path = self._normalize_path(path)
         await self._ensure_owner(session, repository_id, owner_id)
         rows = (await session.scalars(select(RepositoryRelationshipEdge).where(
             RepositoryRelationshipEdge.repository_id == repository_id,
@@ -41,6 +69,11 @@ class RepositoryGraphService:
     def _is_test_path(path: str) -> bool:
         name = path.rsplit("/", 1)[-1]
         return name.startswith("test_") or "/tests/" in f"/{path}"
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """Match repository paths while tolerating accidental query whitespace."""
+        return path.strip()
 
     @staticmethod
     def _deduplicate(rows: list[RepositoryRelationshipEdge]) -> list[RepositoryRelationshipEdge]:

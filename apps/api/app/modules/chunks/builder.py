@@ -465,6 +465,12 @@ class SemanticChunkBuilder:
                 if target_path:
                     imported_paths.add(target_path)
                     relation = {"symbol": source, "path": target_path}
+                    imported_symbol = self._resolve_imported_symbol(import_item, definitions, target_path)
+                    if imported_symbol:
+                        relation.update({
+                            "symbol": imported_symbol["symbol"],
+                            "stable_symbol_id": imported_symbol["stable_symbol_id"],
+                        })
                     relationships["imports"].append(relation)
                     for target in chunks_by_path[target_path]:
                         target.metadata["relationships"]["imported_by"].append({"path": chunk.path})
@@ -495,13 +501,26 @@ class SemanticChunkBuilder:
     ) -> dict | None:
         name = value.split(".")[-1]
         candidates = definitions.get(name, [])
-        if len(candidates) == 1:
-            return candidates[0]
         local_candidates = [candidate for candidate in candidates if candidate["path"] == current_path]
         if len(local_candidates) == 1:
             return local_candidates[0]
         imported_candidates = [candidate for candidate in candidates if candidate["path"] in imported_paths]
         return imported_candidates[0] if len(imported_candidates) == 1 else None
+
+    @staticmethod
+    def _resolve_imported_symbol(
+        import_item: dict, definitions: dict[str, list[dict]], target_path: str
+    ) -> dict | None:
+        items = import_item.get("items", [])
+        if not isinstance(items, list):
+            return None
+        for item in reversed(items):
+            if not isinstance(item, str):
+                continue
+            candidates = [candidate for candidate in definitions.get(item, []) if candidate["path"] == target_path]
+            if len(candidates) == 1:
+                return candidates[0]
+        return None
 
     def _resolve_import_path(self, source: str | None, current_path: str, module_paths: dict[str, str]) -> str | None:
         if not source:

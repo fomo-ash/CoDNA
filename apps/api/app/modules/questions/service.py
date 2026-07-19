@@ -15,6 +15,8 @@ from app.core.config import Settings
 from app.db.models.repository_chunk import RepositoryChunk
 from app.modules.chunks.schemas import RepositoryChunkRead
 from app.modules.embeddings.service import EmbeddingConfigurationError
+from app.modules.graph.schemas import RepositoryImpactTraversalResponse
+from app.modules.graph.service import RepositoryGraphService
 from app.modules.questions.budget import AnswerUsageTracker, DatabaseAnswerUsageTracker
 from app.modules.questions.cache import AnswerCache, DatabaseAnswerCache
 from app.modules.questions.schemas import (
@@ -129,37 +131,57 @@ class RepositoryQuestionService:
         provider: AnswerProvider | None = None,
         usage_tracker: AnswerUsageTracker | None = None,
         answer_cache: AnswerCache | None = None,
+        graph_service: RepositoryGraphService | None = None,
     ) -> None:
         self.settings = settings
         self.retrieval_service = retrieval_service
         self.provider = provider
         self.usage_tracker = usage_tracker or DatabaseAnswerUsageTracker(settings)
         self.answer_cache = answer_cache or DatabaseAnswerCache()
+        self.graph_service = graph_service or RepositoryGraphService()
 
     async def ask(
-        self, session: AsyncSession, repository_id: UUID, owner_id: UUID, question: str
+        self, session: AsyncSession, repository_id: UUID, owner_id: UUID, question: str,
+        impact_path: str | None = None, impact_depth: int = 2,
     ) -> RepositoryQuestionResponse:
-        if cached := await self.answer_cache.get(session, repository_id, owner_id, question):
+        traversal: RepositoryImpactTraversalResponse | None = None
+        if impact_path:
+            traversal = await self.graph_service.traverse_impact(
+                session, repository_id, owner_id, impact_path, impact_depth
+            )
+        elif cached := await self.answer_cache.get(session, repository_id, owner_id, question):
             return cached
-        retrieval = await self.retrieval_service.search(
-            session=session,
-            repository_id=repository_id,
-            owner_id=owner_id,
-            query=question,
-            source_type=None,
-            chunk_type=None,
-            limit=self.settings.answer_max_context_chunks,
-        )
-        if not retrieval.results:
+        if traversal is not None:
+            results = await self._impact_evidence(session, repository_id, [], traversal)
+            vector_search_used = False
+        else:
+            retrieval = await self.retrieval_service.search(
+                session=session,
+                repository_id=repository_id,
+                owner_id=owner_id,
+                query=question,
+                source_type=None,
+                chunk_type=None,
+                limit=self.settings.answer_max_context_chunks,
+            )
+            vector_search_used = retrieval.vector_search_used
+            if not retrieval.results:
+                return RepositoryQuestionResponse(
+                    repository_id=repository_id,
+                    question=question,
+                    answer="I could not find enough indexed repository evidence to answer that question.",
+                    citations=[],
+                    vector_search_used=vector_search_used,
+                )
+            results = await self._expand_related_evidence(session, repository_id, retrieval.results)
+        if not results:
             return RepositoryQuestionResponse(
                 repository_id=repository_id,
                 question=question,
                 answer="I could not find enough indexed repository evidence to answer that question.",
                 citations=[],
-                vector_search_used=retrieval.vector_search_used,
+                vector_search_used=vector_search_used,
             )
-
-        results = await self._expand_related_evidence(session, repository_id, retrieval.results)
         citations = self._citations(results)
 
         maximum_cost = self._maximum_cost()
@@ -167,7 +189,7 @@ class RepositoryQuestionService:
             session, owner_id, repository_id, self.settings.answer_provider, self.settings.answer_model, maximum_cost
         )
         try:
-            generation = await (self.provider or self._provider()).answer(self._prompt(question, results))
+            generation = await (self.provider or self._provider()).answer(self._prompt(question, results, traversal))
         except Exception:
             await self.usage_tracker.finalize(session, reservation, 0, 0, Decimal("0"), "failed")
             raise
@@ -186,9 +208,10 @@ class RepositoryQuestionService:
             question=question,
             answer=answer,
             citations=citations,
-            vector_search_used=retrieval.vector_search_used,
+            vector_search_used=vector_search_used,
         )
-        await self.answer_cache.save(session, response)
+        if traversal is None:
+            await self.answer_cache.save(session, response)
         return response
 
     def _provider(self) -> AnswerProvider:
@@ -243,6 +266,35 @@ class RepositoryQuestionService:
         ]
         return [*results, *related[: self.settings.answer_max_related_chunks]]
 
+    async def _impact_evidence(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        results: Sequence[RepositorySearchResult],
+        traversal: RepositoryImpactTraversalResponse,
+    ) -> list[RepositorySearchResult]:
+        """Limit impact explanations to the target and graph-confirmed dependents."""
+        allowed_paths = [traversal.path, *traversal.affected_paths]
+        allowed_set = set(allowed_paths)
+        selected = [result for result in results if result.chunk.path in allowed_set]
+        existing_ids = {result.chunk.id for result in selected}
+        rows = await session.execute(
+            select(RepositoryChunk)
+            .where(
+                RepositoryChunk.repository_id == repository_id,
+                RepositoryChunk.path.in_(allowed_paths),
+            )
+            .order_by(RepositoryChunk.path, RepositoryChunk.start_line, RepositoryChunk.id)
+        )
+        selected.extend(
+            RepositorySearchResult(
+                chunk=RepositoryChunkRead.model_validate(chunk), score=0, lexical_score=0, vector_score=None
+            )
+            for chunk in rows.scalars()
+            if chunk.id not in existing_ids
+        )
+        return selected
+
     @staticmethod
     def _related_paths(results: Sequence[RepositorySearchResult]) -> list[str]:
         paths: list[str] = []
@@ -255,7 +307,12 @@ class RepositoryQuestionService:
                         paths.append(path)
         return paths
 
-    def _prompt(self, question: str, results: Sequence[RepositorySearchResult]) -> str:
+    def _prompt(
+        self,
+        question: str,
+        results: Sequence[RepositorySearchResult],
+        traversal: RepositoryImpactTraversalResponse | None = None,
+    ) -> str:
         remaining = self.settings.answer_max_context_characters
         evidence: list[str] = []
         included_imports_for_paths: set[str] = set()
@@ -274,11 +331,16 @@ class RepositoryQuestionService:
             content = f"{import_context}{chunk.content}"[:available]
             evidence.append(f"{header}{content}")
             remaining -= len(header) + len(content)
+        traversal_context = self._traversal_context(traversal)
         return f"""You are CodeDNA, an expert software engineering assistant that analyzes entire repositories. You are provided retrieved source code and repository relationships. Answer using repository-level reasoning, not isolated file summaries, and support conclusions using the supplied repository evidence.
 
 Begin by identifying the active implementation and active execution path relevant to the question. First, trace the application's entry point or files that implement the feature, then use resolved imports, incoming and outgoing callers, references, reverse dependencies, and parent/child symbols to synthesize how modules interact. Clearly distinguish active code from alternate, legacy, or unused implementations; call code unused or unreachable only when the supplied relationships support that conclusion.
 
 For execution or data-flow questions, explain the active flow in order. For architecture questions, cover execution flow, component hierarchy, data flow, state ownership, prop flow, and import relationships when relevant. For modification or impact questions, explain the files, symbols, variables, props/interfaces, data contracts, callers/dependents, runtime consequences, and modification order that are actually affected—and explain why each change is needed. When multiple grounded strategies exist, present them separately with their trade-offs.
+
+When the question asks for a change-impact analysis of a file or symbol, treat supplied impact-traversal paths and resolved repository relationships as the authoritative dependency graph. The impact traversal is the primary source of truth for dependency propagation: use the dependency graph before retrieved code, use its dependency paths to explain why each file is affected, and always walk every path in order. A path `A -> B` means that B depends on A, so a change propagates from A to B; never reverse that direction or combine separate paths into a new chain. For every affected file, find its exact listed dependency path, explain how the change propagates along that path, and use retrieved code only to explain the established relationship. Discuss every file listed in affected_paths unless the traversal lacks sufficient information, in which case say so explicitly. Do not replace traversal evidence with independent reasoning from retrieved code or unrelated repository evidence. When dependency paths are supplied, structure the explanation around those exact paths. Begin with the requested item's responsibility, then use exactly these sections: "## Summary", "## Direct Impact", "## Transitive Impact", "## Risk Assessment", and "## Recommended Validation". Separate one-hop dependents from downstream dependents. Explain every dependency path in order, why each file is affected, the connecting API, class, function, or component contract when the evidence identifies it, and the likely behavior change. Merge shared path segments rather than repeating them. Label relationships as imports, calls, renders, references, or inheritance only when that relationship type is supplied. State the impact risk as low, medium, or high and recommend targeted files, tests, or execution paths to validate. If the traversal depth is limited, explicitly say that further downstream impacts may exist. Do not invent dependencies or relationship types that are absent from the evidence.
+
+For an impact request, only files in the supplied affected_paths are impact candidates. A file imported by the requested path is context about what that file depends on, not an affected file, unless it is also in affected_paths.
 
 Prefer resolved repository-local relationships. Ignore unresolved built-in, standard-library, collection, and language-runtime relationships such as len, sum, print, append, random.choice, or method helpers unless the question specifically asks about them. Never infer a relationship that is absent from the supplied evidence.
 
@@ -288,9 +350,29 @@ Write a concise, natural, and complete answer. For a requested change plan, use 
 
 Question: {question}
 
+{traversal_context}
+
 Evidence:
 {chr(10).join(evidence)}
 """
+
+    @staticmethod
+    def _traversal_context(traversal: RepositoryImpactTraversalResponse | None) -> str:
+        if traversal is None:
+            return ""
+        affected_paths = ", ".join(traversal.affected_paths) or "(none)"
+        dependency_paths = "\n".join(
+            f"- {' -> '.join(path)}" for path in traversal.paths
+        ) or "- (none)"
+        return (
+            "Authoritative impact traversal:\n"
+            "- Path direction: A -> B means B depends on A; changes propagate from A to B.\n"
+            f"- Target path: {traversal.path}\n"
+            f"- Traversal depth: {traversal.depth}\n"
+            f"- affected_paths: {affected_paths}\n"
+            "- dependency_paths:\n"
+            f"{dependency_paths}"
+        )
 
     @staticmethod
     def _citations(results: Sequence[RepositorySearchResult]) -> list[RepositoryAnswerCitation]:

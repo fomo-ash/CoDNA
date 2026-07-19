@@ -30,3 +30,7 @@ def test_impact_test_path_detection() -> None:
     assert RepositoryGraphService._is_test_path("test_environment.py")
     assert RepositoryGraphService._is_test_path("tests/test_environment.py")
     assert not RepositoryGraphService._is_test_path("environment.py")
+
+
+def test_impact_path_normalization_removes_accidental_query_whitespace() -> None:
+    assert RepositoryGraphService._normalize_path(" environment.py \t") == "environment.py"
