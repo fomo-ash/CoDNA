@@ -285,107 +285,223 @@ export default function Dashboard() {
                 </button>
               </div>
             ) : (
-              <div className="bg-paper-white rounded-cards border border-ink-black/[0.05] shadow-subtle p-[24px] overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-mist-gray pb-[12px] text-ash-gray text-[12px] uppercase font-w500 tracking-wider">
-                        <th className="py-[12px] px-[16px] font-w500">Repository Name</th>
-                        <th className="py-[12px] px-[16px] font-w500">Status</th>
-                        <th className="py-[12px] px-[16px] font-w500">Default Branch</th>
-                        <th className="py-[12px] px-[16px] font-w500">Scope</th>
-                        <th className="py-[12px] px-[16px] font-w500 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-mist-gray">
-                      {importedRepos.map((repo) => {
-                        const associatedJob = Object.values(activeJobs).find((j) => j.repoId === repo.id);
-                        const jobStatus = associatedJob?.status || null;
-                        const jobError = associatedJob?.error || null;
+              <>
+                {/* Failed-Job Panel */}
+                {importedRepos.some(r => r.status === "failed") && (
+                  <div className="bg-red-50 border border-red-200 rounded-cards p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-200">
+                    <div className="flex items-start gap-3">
+                      <span className="text-lg pt-0.5">⚠️</span>
+                      <div>
+                        <h4 className="text-[15px] font-w500 text-red-900 font-sohne">Indexing Cycle Interrupted</h4>
+                        <p className="text-[13px] text-red-700 mt-1 max-w-2xl">
+                          One or more repositories encountered issues during cloning or parser extraction. Raw tracebacks are hidden for security. You can safely trigger re-indexing below.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 self-end md:self-auto">
+                      {importedRepos.filter(r => r.status === "failed").map(r => (
+                        <button
+                          key={r.id}
+                          onClick={() => handleStartIndexing(r.id)}
+                          className="h-8 px-3.5 rounded-buttons bg-red-600 hover:bg-red-700 text-white text-[12px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-sm"
+                        >
+                          Retry {r.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                        return (
-                          <tr key={repo.id} className="hover:bg-fog-white transition-colors duration-150">
-                            <td className="py-[16px] px-[16px]">
-                              <div className="flex flex-col">
-                                <span className="text-[16px] font-sohne font-w500 text-ink-black">
-                                  {repo.name}
-                                </span>
-                                <span className="text-[13px] text-slate-gray font-w400 mt-[2px]">
-                                  {repo.full_name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-[16px] px-[16px]">
-                              <div className="flex items-center gap-[8px]">
-                                <span className={`px-[10px] py-[4px] text-[11px] font-w500 rounded-buttons uppercase tracking-wider ${getStatusBadgeClass(repo.status)}`}>
-                                  {repo.status}
-                                </span>
+                {/* Table View (Desktop & Tablet) */}
+                <div className="hidden md:block bg-paper-white rounded-cards border border-ink-black/[0.05] shadow-subtle p-[24px] overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-mist-gray pb-[12px] text-ash-gray text-[12px] uppercase font-w500 tracking-wider">
+                          <th className="py-[12px] px-[16px] font-w500">Repository Name</th>
+                          <th className="py-[12px] px-[16px] font-w500">Status</th>
+                          <th className="py-[12px] px-[16px] font-w500">Default Branch</th>
+                          <th className="py-[12px] px-[16px] font-w500">Last Indexed</th>
+                          <th className="py-[12px] px-[16px] font-w500">Scope</th>
+                          <th className="py-[12px] px-[16px] font-w500 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-mist-gray">
+                        {importedRepos.map((repo) => {
+                          const associatedJob = Object.values(activeJobs).find((j) => j.repoId === repo.id);
+                          const jobStatus = associatedJob?.status || null;
+                          const jobError = associatedJob?.error || null;
 
-                                {(repo.status === "indexing" || repo.status === "cloning" || jobStatus === "queued" || jobStatus === "running") && (
-                                  <span className="text-[12px] text-amber-600 font-w400 italic">
-                                    ({jobStatus || "indexing"}...)
+                          return (
+                            <tr key={repo.id} className="hover:bg-fog-white transition-colors duration-150">
+                              <td className="py-[16px] px-[16px]">
+                                <div className="flex flex-col">
+                                  <span className="text-[16px] font-sohne font-w500 text-ink-black">
+                                    {repo.name}
                                   </span>
-                                )}
-                              </div>
-                              {jobError && (
-                                <div className="text-[11px] text-red-500 mt-[4px] max-w-[200px] truncate">
-                                  {jobError}
+                                  <span className="text-[13px] text-slate-gray font-w400 mt-[2px]">
+                                    {repo.full_name}
+                                  </span>
                                 </div>
-                              )}
-                            </td>
-                            <td className="py-[16px] px-[16px] text-[15px] text-slate-gray">
-                              <code>{repo.default_branch}</code>
-                            </td>
-                            <td className="py-[16px] px-[16px] text-[15px] text-slate-gray capitalize">
-                              {repo.visibility}
-                            </td>
-                            <td className="py-[16px] px-[16px] text-right">
-                              <div className="flex items-center justify-end gap-[12px]">
-                                {repo.status === "registered" && (
-                                  <button
-                                    onClick={() => handleStartIndexing(repo.id)}
-                                    className="h-[36px] px-[16px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-                                  >
-                                    Start Indexing
-                                  </button>
-                                )}
+                              </td>
+                              <td className="py-[16px] px-[16px]">
+                                <div className="flex items-center gap-[8px]">
+                                  <span className={`px-[10px] py-[4px] text-[11px] font-w500 rounded-buttons uppercase tracking-wider ${getStatusBadgeClass(repo.status)}`}>
+                                    {repo.status}
+                                  </span>
 
-                                {(repo.status === "indexing" || repo.status === "cloning") && (
-                                  <button
-                                    disabled
-                                    className="h-[36px] px-[16px] rounded-buttons bg-mist-gray text-slate-gray text-[14px] font-w400 cursor-not-allowed flex items-center justify-center gap-[8px]"
-                                  >
-                                    <span className="w-[14px] h-[14px] rounded-full border border-slate-gray border-t-transparent animate-spin" />
-                                    Indexing
-                                  </button>
+                                  {(repo.status === "indexing" || repo.status === "cloning" || jobStatus === "queued" || jobStatus === "running") && (
+                                    <span className="text-[12px] text-amber-600 font-w400 italic">
+                                      ({jobStatus || "indexing"}...)
+                                    </span>
+                                  )}
+                                </div>
+                                {jobError && (
+                                  <div className="text-[11px] text-red-500 mt-[4px] max-w-[200px] truncate">
+                                    {jobError}
+                                  </div>
                                 )}
+                              </td>
+                              <td className="py-[16px] px-[16px] text-[15px] text-slate-gray font-mono">
+                                {repo.default_branch}
+                              </td>
+                              <td className="py-[16px] px-[16px] text-[14px] text-slate-gray">
+                                {repo.last_indexed_at ? new Date(repo.last_indexed_at).toLocaleString() : "Never"}
+                              </td>
+                              <td className="py-[16px] px-[16px] text-[15px] text-slate-gray capitalize">
+                                {repo.visibility}
+                              </td>
+                              <td className="py-[16px] px-[16px] text-right">
+                                <div className="flex items-center justify-end gap-[12px]">
+                                  {repo.status === "registered" && (
+                                    <button
+                                      onClick={() => handleStartIndexing(repo.id)}
+                                      className="h-[36px] px-[16px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                                    >
+                                      Start Indexing
+                                    </button>
+                                  )}
 
-                                {repo.status === "ready" && (
-                                  <button
-                                    onClick={() => router.push(`/repositories/${repo.id}`)}
-                                    className="h-[36px] px-[16px] rounded-buttons bg-transparent text-ink-black border border-ink-black hover:bg-mist-gray text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-                                  >
-                                    Explore Catalog →
-                                  </button>
-                                )}
+                                  {(repo.status === "indexing" || repo.status === "cloning") && (
+                                    <button
+                                      disabled
+                                      className="h-[36px] px-[16px] rounded-buttons bg-mist-gray text-slate-gray text-[14px] font-w400 cursor-not-allowed flex items-center justify-center gap-[8px]"
+                                    >
+                                      <span className="w-[14px] h-[14px] rounded-full border border-slate-gray border-t-transparent animate-spin" />
+                                      Indexing
+                                    </button>
+                                  )}
 
-                                {repo.status === "failed" && (
-                                  <button
-                                    onClick={() => handleStartIndexing(repo.id)}
-                                    className="h-[36px] px-[16px] rounded-buttons bg-red-50 text-red-700 hover:bg-red-100 text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-                                  >
-                                    Retry Index
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                                  {repo.status === "ready" && (
+                                    <button
+                                      onClick={() => router.push(`/repositories/${repo.id}`)}
+                                      className="h-[36px] px-[16px] rounded-buttons bg-transparent text-ink-black border border-ink-black hover:bg-mist-gray text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                                    >
+                                      Explore Catalog →
+                                    </button>
+                                  )}
+
+                                  {repo.status === "failed" && (
+                                    <button
+                                      onClick={() => handleStartIndexing(repo.id)}
+                                      className="h-[36px] px-[16px] rounded-buttons bg-red-50 text-red-700 hover:bg-red-100 text-[14px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                                    >
+                                      Retry Index
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+
+                {/* Card View (Mobile Layout) */}
+                <div className="grid grid-cols-1 gap-[16px] md:hidden">
+                  {importedRepos.map((repo) => {
+                    const associatedJob = Object.values(activeJobs).find((j) => j.repoId === repo.id);
+                    const jobStatus = associatedJob?.status || null;
+                    const jobError = associatedJob?.error || null;
+
+                    return (
+                      <div key={repo.id} className="bg-paper-white rounded-cards border border-ink-black/[0.05] p-[16px] shadow-subtle flex flex-col gap-[12px]">
+                        <div className="flex items-start justify-between">
+                          <div className="flex flex-col truncate pr-2">
+                            <span className="text-[16px] font-w500 text-ink-black truncate">{repo.name}</span>
+                            <span className="text-[13px] text-slate-gray mt-[2px] truncate">{repo.full_name}</span>
+                          </div>
+                          <span className={`px-[8px] py-[3px] text-[10px] font-w500 rounded-buttons uppercase tracking-wider flex-shrink-0 ${getStatusBadgeClass(repo.status)}`}>
+                            {repo.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-[12px] text-[13px] border-t border-b border-mist-gray/40 py-[8px]">
+                          <div>
+                            <span className="text-ash-gray block uppercase text-[10px] tracking-wider mb-[2px]">Default Branch</span>
+                            <code className="text-ink-black font-mono">{repo.default_branch}</code>
+                          </div>
+                          <div>
+                            <span className="text-ash-gray block uppercase text-[10px] tracking-wider mb-[2px]">Last Indexed</span>
+                            <span className="text-slate-gray">{repo.last_indexed_at ? new Date(repo.last_indexed_at).toLocaleDateString() : "Never"}</span>
+                          </div>
+                        </div>
+
+                        {jobError && (
+                          <div className="text-[12px] text-red-500 bg-red-50/50 p-2 border border-red-100 rounded-lg">
+                            {jobError}
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px] text-slate-gray capitalize">{repo.visibility}</span>
+
+                          <div className="flex gap-[8px]">
+                            {repo.status === "registered" && (
+                              <button
+                                onClick={() => handleStartIndexing(repo.id)}
+                                className="h-[32px] px-[12px] rounded-buttons bg-ink-black text-paper-white text-[12px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                              >
+                                Start
+                              </button>
+                            )}
+
+                            {(repo.status === "indexing" || repo.status === "cloning") && (
+                              <button
+                                disabled
+                                className="h-[32px] px-[12px] rounded-buttons bg-mist-gray text-slate-gray text-[12px] font-w400 cursor-not-allowed flex items-center justify-center gap-[4px]"
+                              >
+                                <span className="w-[10px] h-[10px] rounded-full border border-slate-gray border-t-transparent animate-spin" />
+                                Indexing
+                              </button>
+                            )}
+
+                            {repo.status === "ready" && (
+                              <button
+                                onClick={() => router.push(`/repositories/${repo.id}`)}
+                                className="h-[32px] px-[12px] rounded-buttons bg-transparent text-ink-black border border-ink-black hover:bg-mist-gray text-[12px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                              >
+                                Explore →
+                              </button>
+                            )}
+
+                            {repo.status === "failed" && (
+                              <button
+                                onClick={() => handleStartIndexing(repo.id)}
+                                className="h-[32px] px-[12px] rounded-buttons bg-red-50 text-red-700 hover:bg-red-100 text-[12px] font-w500 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                              >
+                                Retry
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         )}

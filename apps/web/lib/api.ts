@@ -3,11 +3,21 @@ import {
   Repository,
   GitHubDiscoveryResponse,
   FilesResponse,
+  RepositoryFile,
   RepositoryStats,
   JobResponse,
   JobDetail,
   RepositoryStatus,
-  JobStatus
+  JobStatus,
+  AuthTokenResponse,
+  RepositoryFileParseRead,
+  RepositoryFileParseListResponse,
+  RepositoryKnowledgeItemRead,
+  RepositoryKnowledgeItemListResponse,
+  RepositoryChunkRead,
+  RepositoryChunkListResponse,
+  RepositorySearchResult,
+  RepositorySearchResponse
 } from "../types/api";
 
 const API_BASE_URL = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001") : "http://localhost:8001";
@@ -217,7 +227,7 @@ const mockApi = {
     payload: { github_id: string } | { full_name: string }
   ): Promise<Repository> => {
     const db = getMockDB();
-    
+
     const githubRepo = MOCK_GITHUB_REPOS.find(repo => {
       if ("github_id" in payload) return repo.github_id === payload.github_id;
       if ("full_name" in payload) return repo.full_name === payload.full_name;
@@ -274,9 +284,9 @@ const mockApi = {
     }
 
     const jobId = "job-" + Math.floor(Math.random() * 100000);
-    
+
     db.importedRepos[repoIndex].status = "indexing";
-    
+
     db.jobs[jobId] = {
       id: jobId,
       repository_id: id,
@@ -288,14 +298,14 @@ const mockApi = {
 
     let steps: JobStatus[] = ["running", "completed"];
     let delay = 2000;
-    
+
     steps.forEach((step, idx) => {
       setTimeout(() => {
         const currentDb = getMockDB();
         if (currentDb.jobs[jobId]) {
           currentDb.jobs[jobId].status = step;
           currentDb.jobs[jobId].updated_at = new Date().toISOString();
-          
+
           if (step === "completed") {
             const currentRepoIdx = currentDb.importedRepos.findIndex(r => r.id === id);
             if (currentRepoIdx !== -1) {
@@ -327,7 +337,7 @@ const mockApi = {
     } = {}
   ): Promise<FilesResponse> => {
     const mockFiles = MOCK_FILES_BY_REPO[id] || MOCK_FILES_BY_REPO["default"];
-    
+
     let list: RepositoryFile[] = mockFiles.map((f, index) => ({
       id: `${id}-file-${index}`,
       repository_id: id,
@@ -394,6 +404,468 @@ const mockApi = {
       throw new Error("Job not found");
     }
     return job;
+  },
+
+  githubCallback: async (code: string, state: string): Promise<AuthTokenResponse> => {
+    localStorage.setItem("codedna_jwt", "mock_codedna_jwt_token_123456");
+    return {
+      access_token: "mock_codedna_jwt_token_123456",
+      token_type: "bearer",
+      expires_in: 3600,
+      user: {
+        id: "13834d99-e025-48fe-a640-067f600bb9a2",
+        github_id: "12345",
+        username: "octocat",
+        email: "octocat@github.com",
+        name: "The Octocat",
+        avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    };
+  },
+
+  getRepositoryParseResults: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      status?: string;
+      language?: string;
+      path_prefix?: string;
+    } = {}
+  ): Promise<RepositoryFileParseListResponse> => {
+    const mockFiles = MOCK_FILES_BY_REPO[id] || MOCK_FILES_BY_REPO["default"];
+
+    let list: RepositoryFileParseRead[] = mockFiles.map((f, index) => {
+      const isParserError = f.path.includes("router.py") && index % 2 === 0;
+      const isUnsupported = f.lang === "Markdown" || f.lang === "CSS" || f.lang === "JSON";
+      const isBinary = f.lang === "Binary";
+
+      let status = "parsed";
+      let error_message: string | null = null;
+      let root_node_type: string | null = "module";
+
+      if (isParserError) {
+        status = "syntax_error";
+        error_message = "SyntaxError: invalid syntax at line 12";
+        root_node_type = null;
+      } else if (isUnsupported) {
+        status = "unsupported";
+        root_node_type = null;
+      } else if (isBinary) {
+        status = "skipped";
+        root_node_type = null;
+      }
+
+      return {
+        id: `${id}-parse-${index}`,
+        repository_id: id,
+        repository_file_id: `${id}-file-${index}`,
+        path: f.path,
+        language: f.lang,
+        parser: isUnsupported || isBinary ? null : f.lang.toLowerCase(),
+        status,
+        root_node_type,
+        has_error: status === "syntax_error",
+        error_count: status === "syntax_error" ? 1 : 0,
+        symbol_count: status === "parsed" ? 2 : 0,
+        import_count: status === "parsed" ? 1 : 0,
+        symbols: status === "parsed" ? [
+          { name: f.path.split("/").pop()?.split(".")[0] || "symbol", kind: "module_scope", start_line: 1, end_line: 100 },
+          { name: "process_data", kind: "function", start_line: 15, end_line: 45 }
+        ] : [],
+        imports: status === "parsed" ? [
+          { statement: "import os", start_line: 1, end_line: 1 }
+        ] : [],
+        parsed_at: new Date().toISOString(),
+        error_message,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    if (params.status) {
+      list = list.filter(f => f.status === params.status);
+    }
+    if (params.language) {
+      list = list.filter(f => f.language?.toLowerCase() === params.language?.toLowerCase());
+    }
+    if (params.path_prefix) {
+      list = list.filter(f => f.path.toLowerCase().includes(params.path_prefix!.toLowerCase()));
+    }
+
+    const page = params.page || 1;
+    const pageSize = params.page_size || 50;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+
+    return {
+      parse_results: list.slice(start, end),
+      page,
+      page_size: pageSize,
+      has_next_page: end < list.length
+    };
+  },
+
+  getRepositoryKnowledge: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      source_type?: string;
+      item_type?: string;
+      path_prefix?: string;
+    } = {}
+  ): Promise<RepositoryKnowledgeItemListResponse> => {
+    const items: RepositoryKnowledgeItemRead[] = [
+      {
+        id: `${id}-k-1`,
+        repository_id: id,
+        repository_file_id: `${id}-file-readme`,
+        path: "README.md",
+        source_type: "documentation",
+        item_type: "document",
+        name: "Project Overview",
+        extractor: "documentation",
+        data: {
+          title: "CodeDNA Documentation",
+          heading_count: 5,
+          link_count: 3,
+          code_block_count: 2
+        },
+        extracted_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: `${id}-k-2`,
+        repository_id: id,
+        repository_file_id: `${id}-file-package`,
+        path: "package.json",
+        source_type: "configuration",
+        item_type: "package_manifest",
+        name: "Node Package Config",
+        extractor: "configuration",
+        data: {
+          name: "@codedna/web",
+          version: "0.1.0",
+          private: true,
+          dependencies: {
+            "next": "16.0.0",
+            "react": "19.0.0",
+            "typescript": "5.0.0"
+          }
+        },
+        extracted_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: `${id}-k-3`,
+        repository_id: id,
+        repository_file_id: `${id}-file-schema`,
+        path: "prisma/schema.prisma",
+        source_type: "database_schema",
+        item_type: "prisma_model",
+        name: "UserModel",
+        extractor: "schema",
+        data: {
+          model_name: "User",
+          fields_count: 8,
+          relations: ["Repository", "Session"]
+        },
+        extracted_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: `${id}-k-4`,
+        repository_id: id,
+        repository_file_id: `${id}-file-config`,
+        path: "next.config.ts",
+        source_type: "configuration",
+        item_type: "typescript_config",
+        name: "Next Configuration",
+        extractor: "configuration",
+        data: {
+          experimental_features: ["appDir"],
+          react_strict_mode: true
+        },
+        extracted_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ];
+
+    let filtered = items;
+    if (params.source_type) {
+      filtered = filtered.filter(item => item.source_type === params.source_type);
+    }
+    if (params.item_type) {
+      filtered = filtered.filter(item => item.item_type === params.item_type);
+    }
+    if (params.path_prefix) {
+      filtered = filtered.filter(item => item.path?.toLowerCase().includes(params.path_prefix!.toLowerCase()));
+    }
+
+    const page = params.page || 1;
+    const pageSize = params.page_size || 50;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+
+    return {
+      knowledge_items: filtered.slice(start, end),
+      page,
+      page_size: pageSize,
+      has_next_page: end < filtered.length
+    };
+  },
+
+  getRepositoryChunks: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      source_type?: string;
+      chunk_type?: string;
+    } = {}
+  ): Promise<RepositoryChunkListResponse> => {
+    const mockFiles = MOCK_FILES_BY_REPO[id] || MOCK_FILES_BY_REPO["default"];
+
+    let list: RepositoryChunkRead[] = [];
+    mockFiles.forEach((f, idx) => {
+      if (f.lang === "Python") {
+        list.push({
+          id: `${id}-chunk-func-${idx}`,
+          repository_id: id,
+          repository_file_id: `${id}-file-${idx}`,
+          path: f.path,
+          chunk_type: "function",
+          source_type: "source_code",
+          title: `function: ${f.path.split("/").pop()?.split(".")[0] || "func"}()`,
+          language: f.lang,
+          content: `def run_task(db_session, payload):\n    \"\"\"Run background job mapping\"\"\"\n    logger.info("Executing task mapping for ${f.path}")\n    try:\n        result = process_data(payload)\n        db_session.save(result)\n        return {"status": "success", "result": result}\n    except Exception as e:\n        logger.error(f"Task failed: {e}")\n        raise TaskExecutionError(str(e))`,
+          start_line: 10,
+          end_line: 20,
+          metadata: {
+            stable_symbol_id: `codna:${f.path}:run_task`,
+            relationships: {
+              calls: [
+                { symbol: "process_data", path: f.path, stable_symbol_id: `codna:${f.path}:process_data` },
+                { symbol: "logger.info" }
+              ],
+              called_by: [],
+              imports: [
+                { symbol: "logging", path: "stdlib" }
+              ],
+              imported_by: [],
+              inherits: [],
+              implements: [],
+              references: [],
+              exports: [{ symbol: "run_task" }]
+            }
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } else if (f.lang === "TypeScript" || f.lang === "JavaScript") {
+        list.push({
+          id: `${id}-chunk-class-${idx}`,
+          repository_id: id,
+          repository_file_id: `${id}-file-${idx}`,
+          path: f.path,
+          chunk_type: "class",
+          source_type: "source_code",
+          title: `class: ${f.path.split("/").pop()?.split(".")[0] || "Class"}`,
+          language: f.lang,
+          content: `export class DataExplorer {\n  private endpoint: string;\n\n  constructor(endpoint: string) {\n    this.endpoint = endpoint;\n  }\n\n  async fetchAll(repoId: string) {\n    const response = await fetch(\`\${this.endpoint}/repositories/\${repoId}/files\`)\n    return response.json();\n  }\n}`,
+          start_line: 1,
+          end_line: 12,
+          metadata: {
+            stable_symbol_id: `codna:${f.path}:DataExplorer`,
+            relationships: {
+              calls: [
+                { symbol: "fetch", path: "window.fetch" }
+              ],
+              called_by: [],
+              imports: [],
+              imported_by: [],
+              inherits: [],
+              implements: [],
+              references: [],
+              exports: [{ symbol: "DataExplorer" }]
+            }
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } else if (f.lang === "Markdown") {
+        list.push({
+          id: `${id}-chunk-doc-${idx}`,
+          repository_id: id,
+          repository_file_id: `${id}-file-${idx}`,
+          path: f.path,
+          chunk_type: "documentation_section",
+          source_type: "documentation",
+          title: `markdown: ${f.path}`,
+          language: f.lang,
+          content: `# ${f.path.split("/").pop()}\n\nThis document outlines how CodeDNA works and lists the developer details.\n\n## Sub Section\n- High fidelity layouts\n- Clean styling\n- Dynamic pagination`,
+          start_line: 1,
+          end_line: 15,
+          metadata: {
+            stable_symbol_id: `codna:${f.path}:readme_main`,
+            relationships: {
+              calls: [],
+              called_by: [],
+              imports: [],
+              imported_by: [],
+              inherits: [],
+              implements: [],
+              references: [],
+              exports: []
+            }
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        list.push({
+          id: `${id}-chunk-other-${idx}`,
+          repository_id: id,
+          repository_file_id: `${id}-file-${idx}`,
+          path: f.path,
+          chunk_type: "configuration",
+          source_type: "configuration",
+          title: `config: ${f.path}`,
+          language: f.lang,
+          content: `{\n  "name": "codedna-workspace",\n  "version": "1.0.0",\n  "private": true\n}`,
+          start_line: 1,
+          end_line: 5,
+          metadata: {
+            stable_symbol_id: `codna:${f.path}:config`,
+            relationships: {
+              calls: [],
+              called_by: [],
+              imports: [],
+              imported_by: [],
+              inherits: [],
+              implements: [],
+              references: [],
+              exports: []
+            }
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    if (params.source_type) {
+      list = list.filter(c => c.source_type === params.source_type);
+    }
+    if (params.chunk_type) {
+      list = list.filter(c => c.chunk_type === params.chunk_type);
+    }
+
+    const page = params.page || 1;
+    const pageSize = params.page_size || 50;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+
+    return {
+      chunks: list.slice(start, end),
+      page,
+      page_size: pageSize,
+      has_next_page: end < list.length
+    };
+  },
+
+  getChunk: async (chunkId: string): Promise<RepositoryChunkRead> => {
+    const repoId = chunkId.split("-chunk-")[0] || "codna-core";
+    const chunksRes = await mockApi.getRepositoryChunks(repoId);
+    const matched = chunksRes.chunks.find(c => c.id === chunkId);
+
+    if (matched) return matched;
+
+    return {
+      id: chunkId,
+      repository_id: repoId,
+      repository_file_id: `${repoId}-file-default`,
+      path: "src/main.py",
+      chunk_type: "function",
+      source_type: "source_code",
+      title: "function: main()",
+      language: "Python",
+      content: "def main():\n    print('Hello CodeDNA')",
+      start_line: 1,
+      end_line: 2,
+      metadata: {
+        stable_symbol_id: "codna:src/main.py:main",
+        relationships: {
+          calls: [],
+          called_by: [],
+          imports: [],
+          imported_by: [],
+          inherits: [],
+          implements: [],
+          references: [],
+          exports: []
+        }
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  },
+
+  searchRepository: async (
+    id: string,
+    query: string,
+    params: {
+      source_type?: string;
+      chunk_type?: string;
+      limit?: number;
+    } = {}
+  ): Promise<RepositorySearchResponse> => {
+    const chunksRes = await mockApi.getRepositoryChunks(id);
+    let matchedChunks = chunksRes.chunks;
+
+    if (query) {
+      const q = query.toLowerCase();
+      matchedChunks = matchedChunks.filter(c =>
+        c.title.toLowerCase().includes(q) ||
+        c.path.toLowerCase().includes(q) ||
+        c.content.toLowerCase().includes(q)
+      );
+    }
+
+    if (params.source_type) {
+      matchedChunks = matchedChunks.filter(c => c.source_type === params.source_type);
+    }
+
+    if (params.chunk_type) {
+      matchedChunks = matchedChunks.filter(c => c.chunk_type === params.chunk_type);
+    }
+
+    const results: RepositorySearchResult[] = matchedChunks.map((chunk, idx) => {
+      const lexical_score = 0.5 + (1 / (idx + 1)) * 0.4;
+      const vector_score = 0.4 + (1 / (idx + 1)) * 0.4;
+      return {
+        chunk,
+        score: (lexical_score + vector_score) / 2,
+        lexical_score,
+        vector_score
+      };
+    });
+
+    const limit = params.limit || 20;
+
+    return {
+      repository_id: id,
+      query,
+      results: results.slice(0, limit),
+      vector_search_used: true
+    };
   },
 };
 
@@ -475,6 +947,90 @@ export const api = USE_MOCK ? mockApi : {
 
   getJobStatus: async (jobId: string): Promise<JobDetail> => {
     return request<JobDetail>(`/jobs/${jobId}`);
+  },
+
+  githubCallback: async (code: string, state: string): Promise<AuthTokenResponse> => {
+    return request<AuthTokenResponse>(`/auth/github/callback?code=${code}&state=${state}`);
+  },
+
+  getRepositoryParseResults: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      status?: string;
+      language?: string;
+      path_prefix?: string;
+    } = {}
+  ): Promise<RepositoryFileParseListResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.append("page", String(params.page));
+    if (params.page_size) searchParams.append("page_size", String(params.page_size));
+    if (params.status) searchParams.append("status", params.status);
+    if (params.language) searchParams.append("language", params.language);
+    if (params.path_prefix) searchParams.append("path_prefix", params.path_prefix);
+
+    return request<RepositoryFileParseListResponse>(`/repositories/${id}/parse-results?${searchParams.toString()}`);
+  },
+
+  getRepositoryKnowledge: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      source_type?: string;
+      item_type?: string;
+      path_prefix?: string;
+    } = {}
+  ): Promise<RepositoryKnowledgeItemListResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.append("page", String(params.page));
+    if (params.page_size) searchParams.append("page_size", String(params.page_size));
+    if (params.source_type) searchParams.append("source_type", params.source_type);
+    if (params.item_type) searchParams.append("item_type", params.item_type);
+    if (params.path_prefix) searchParams.append("path_prefix", params.path_prefix);
+
+    return request<RepositoryKnowledgeItemListResponse>(`/repositories/${id}/knowledge?${searchParams.toString()}`);
+  },
+
+  getRepositoryChunks: async (
+    id: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      source_type?: string;
+      chunk_type?: string;
+    } = {}
+  ): Promise<RepositoryChunkListResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.append("page", String(params.page));
+    if (params.page_size) searchParams.append("page_size", String(params.page_size));
+    if (params.source_type) searchParams.append("source_type", params.source_type);
+    if (params.chunk_type) searchParams.append("chunk_type", params.chunk_type);
+
+    return request<RepositoryChunkListResponse>(`/repositories/${id}/chunks?${searchParams.toString()}`);
+  },
+
+  getChunk: async (chunkId: string): Promise<RepositoryChunkRead> => {
+    return request<RepositoryChunkRead>(`/chunks/${chunkId}`);
+  },
+
+  searchRepository: async (
+    id: string,
+    query: string,
+    params: {
+      source_type?: string;
+      chunk_type?: string;
+      limit?: number;
+    } = {}
+  ): Promise<RepositorySearchResponse> => {
+    const searchParams = new URLSearchParams();
+    searchParams.append("query", query);
+    if (params.source_type) searchParams.append("source_type", params.source_type);
+    if (params.chunk_type) searchParams.append("chunk_type", params.chunk_type);
+    if (params.limit) searchParams.append("limit", String(params.limit));
+
+    return request<RepositorySearchResponse>(`/repositories/${id}/search?${searchParams.toString()}`);
   },
 };
 

@@ -47,8 +47,23 @@ export default function Home() {
     router.refresh();
   };
 
-  const handleLoginStart = () => {
-    setIsLoginModalOpen(true);
+  const handleLoginStart = async () => {
+    setIsValidating(true);
+    setLoginError("");
+    try {
+      const response = await api.getGithubLoginUrl();
+      if (response && response.authorization_url) {
+        window.location.href = response.authorization_url;
+      } else {
+        throw new Error("No authorization URL returned.");
+      }
+    } catch (err: any) {
+      console.error("OAuth init failed:", err);
+      setLoginError(err.message || "Failed to initialize GitHub OAuth flow.");
+      setIsLoginModalOpen(true);
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const handleTokenSubmit = async (e?: React.FormEvent, customToken?: string) => {
@@ -79,6 +94,7 @@ export default function Home() {
     setTokenInput(mockToken);
     handleTokenSubmit(undefined, mockToken);
   };
+
 
   if (isLoading) {
     return (
@@ -116,20 +132,35 @@ export default function Home() {
             CoDNA extracts architecture mapping, indexes file parameters, and tracks indexing jobs in the background. It reads like a spread, interacts like an asset.
           </p>
 
-          <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-[16px] mb-[64px] w-full max-w-md sm:max-w-none px-[24px]">
+          <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-[16px] mb-[16px] w-full max-w-md sm:max-w-none px-[24px]">
             <button
               onClick={handleLoginStart}
-              className="w-full sm:w-auto h-[48px] px-[32px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-[0.98] transition-all text-[16px] font-medium flex items-center justify-center cursor-pointer shadow-sm"
+              disabled={isValidating}
+              className="w-full sm:w-auto h-[48px] px-[32px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-[0.98] transition-all text-[16px] font-medium flex items-center justify-center cursor-pointer shadow-sm disabled:opacity-75 disabled:cursor-not-allowed"
             >
-              Continue with GitHub
+              {isValidating ? (
+                <>
+                  <span className="w-[16px] h-[16px] rounded-full border border-white border-t-transparent animate-spin mr-[10px]" />
+                  Connecting...
+                </>
+              ) : (
+                "Continue with GitHub"
+              )}
             </button>
             <button
-              onClick={handleLoginStart}
+              onClick={() => alert("Booking a demo is currently offline. Please use GitHub login to explore the dashboard.")}
               className="w-full sm:w-auto h-[48px] px-[32px] rounded-buttons bg-transparent text-ink-black border-2 border-ink-black hover:bg-mist-gray active:scale-[0.98] transition-all text-[16px] font-normal flex items-center justify-center cursor-pointer"
             >
               Book a demo
             </button>
           </div>
+
+          <button
+            onClick={() => setIsLoginModalOpen(true)}
+            className="relative z-10 text-[13px] text-slate-gray hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer mb-[64px]"
+          >
+            Or authenticate with access token / launch demo mode
+          </button>
 
           {/* Collage of Floating Artifacts */}
           <div className="relative z-10 w-full h-[480px] max-w-5xl mx-auto hidden lg:block">
