@@ -136,7 +136,6 @@ The project documentation is intentionally close to the product, not an aftertho
 - [Architecture](docs/ARCHITECTURE.md)
 - [Repository import and ownership](docs/REPOSITORY_REGISTRATION.md)
 - [Repository inventory details](docs/REPOSITORY_INVENTORY.md)
-- [Delivery plan](docs/FUTURE_PLAN.md)
 - [Future roadmap](FUTURE.md)
 
 ## Demo path for judges
