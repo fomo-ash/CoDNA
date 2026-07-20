@@ -368,9 +368,24 @@ function RepositoryDetailsContent({ params }: PageProps) {
                 type="button"
                 onClick={handleReindex}
                 disabled={isReindexing}
-                className="inline-flex items-center justify-center h-9 px-4 rounded-buttons border border-ink-black/15 text-ink-black hover:bg-mist-gray disabled:cursor-not-allowed disabled:opacity-60 transition-all text-[13px] font-medium whitespace-nowrap"
+                title="Run the latest repository indexing job"
+                className="group inline-flex h-9 items-center justify-center gap-2 rounded-full border border-ink-black/10 bg-paper-white px-3.5 text-[13px] font-medium text-slate-gray shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:border-ink-black/20 hover:bg-ink-black hover:text-paper-white hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-black/30 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isReindexing ? "Starting re-index…" : "Re-index repository"}
+                {isReindexing ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+                ) : (
+                  <svg
+                    className="h-3.5 w-3.5 transition-transform duration-300 group-hover:-rotate-45"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden="true"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20 11a8 8 0 0 0-15.5-2.5M4 5v3.5h3.5M4 13a8 8 0 0 0 15.5 2.5M20 19v-3.5h-3.5" />
+                  </svg>
+                )}
+                <span>{isReindexing ? "Starting…" : "Re-index"}</span>
               </button>
             )}
             <Link
