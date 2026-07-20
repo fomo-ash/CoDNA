@@ -41,7 +41,7 @@ not enough.
    App**.
 2. Set the application home page to `http://localhost:3333`.
 3. Set the authorization callback URL to
-   `http://localhost:8001/api/v1/auth/github/callback`.
+   `http://localhost:3333/auth/callback`.
 4. Copy the client ID and generate a client secret.
 
 Edit `apps/api/.env` and replace the placeholder values. At minimum set:
@@ -50,7 +50,7 @@ Edit `apps/api/.env` and replace the placeholder values. At minimum set:
 OPENAI_API_KEY=...
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
-GITHUB_CALLBACK_URL=http://localhost:8001/api/v1/auth/github/callback
+GITHUB_CALLBACK_URL=http://localhost:3333/auth/callback
 FRONTEND_URL=http://localhost:3333
 JWT_SECRET=replace-with-a-long-random-secret
 ```
@@ -129,7 +129,7 @@ docker compose logs -f api
 
 | Symptom | Check |
 | --- | --- |
-| GitHub says the callback URL is invalid | The GitHub OAuth app and `GITHUB_CALLBACK_URL` must both use `http://localhost:8001/api/v1/auth/github/callback`. |
+| GitHub says the callback URL is invalid | The GitHub OAuth app and `GITHUB_CALLBACK_URL` must both use `http://localhost:3333/auth/callback`. |
 | The browser cannot reach the API | Confirm `NEXT_PUBLIC_API_URL=http://localhost:8001`, then run `docker compose up -d --build web`. |
 | Sign-in succeeds but the browser reports CORS | Set `FRONTEND_URL=http://localhost:3333` in `apps/api/.env`, then rebuild/restart `api`. |
 | Indexing fails before search works | Check that the selected embedding provider has its matching API key (`OPENAI_API_KEY` by default; `GOOGLE_API_KEY` for Gemini), then inspect worker logs. |
