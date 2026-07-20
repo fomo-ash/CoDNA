@@ -16,7 +16,7 @@ Node.js and Python are not required on the host.
 ## 1. Clone and create local configuration
 
 ```bash
-git clone <your-fork-or-repository-url> CoDNA
+git clone https://github.com/fomo-ash/CoDNA.git
 cd CoDNA
 cp .env.example .env
 cp apps/api/.env.example apps/api/.env
