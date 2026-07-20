@@ -1,389 +1,132 @@
 # CodeDNA API
 
-## Base URL
+> **Status:** Current implementation
+> **Last reviewed:** 2026-07-20
 
-Local development uses `http://localhost:8001` when the API is started with `API_PORT=8001`. The default Compose port is `8000`.
+## Base URL and authentication
 
-All application routes are under `/api/v1`.
+The local API is normally available at `http://localhost:8001`; all application routes are under `/api/v1`.
 
-For a full manual verification sequence with beginner explanations, see [Backend Verification Guide](BACKEND_VERIFICATION_GUIDE.md).
-
-For repository inventory implementation details and troubleshooting, see [Repository Inventory and File Discovery](REPOSITORY_INVENTORY.md).
-
-## Authentication
-
-Start GitHub OAuth:
+Start GitHub OAuth with:
 
 ```http
 GET /api/v1/auth/github/login
 ```
 
-After GitHub approval, the callback returns a CodeDNA JWT. Use it as:
+After the callback, clients use the backend-issued CodeDNA JWT:
 
 ```http
 Authorization: Bearer <codedna-jwt>
 ```
 
-The GitHub access token is retained by the backend and is never included in CodeDNA responses.
+The GitHub access token remains backend-side. Every repository-scoped route below requires the authenticated caller to own the repository.
 
-## GitHub Discovery
+## Authentication and GitHub
 
-### Current GitHub profile
-
-```http
-GET /api/v1/github/me
-```
-
-Example response:
-
-```json
-{
-  "github_id": "12345",
-  "username": "octocat",
-  "email": "octocat@example.com",
-  "name": "The Octocat",
-  "avatar_url": "https://avatars.example.com/u/12345"
-}
-```
-
-### List accessible repositories
-
-```http
-GET /api/v1/github/repositories?visibility=all&sort=updated&page=1&per_page=30
-```
-
-Query parameters:
-
-| Parameter | Values | Default |
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `visibility` | `all`, `public`, `private` | `all` |
-| `sort` | `created`, `updated`, `pushed`, `full_name` | `updated` |
-| `page` | Positive integer | `1` |
-| `per_page` | `1` to `100` | `30` |
+| `GET` | `/auth/github/login` | Begin GitHub OAuth |
+| `GET` | `/auth/github/callback` | Complete OAuth and return CodeDNA JWT |
+| `GET` | `/auth/me` | Read current CodeDNA user |
+| `GET` | `/github/me` | Read connected GitHub profile |
+| `GET` | `/github/repositories` | Browse GitHub repositories available to the caller |
 
-Example response:
+`/github/repositories` accepts `visibility`, `sort`, `page`, and `per_page` (`1`–`100`).
 
-```json
-{
-  "repositories": [
-    {
-      "github_id": "12345",
-      "name": "example",
-      "full_name": "octo/example",
-      "default_branch": "main",
-      "clone_url": "https://github.com/octo/example.git",
-      "visibility": "private",
-      "private": true
-    }
-  ],
-  "page": 1,
-  "per_page": 30,
-  "has_next_page": false
-}
-```
+## Repository registration and jobs
 
-## Repository Import
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/repositories` | Register a GitHub repository |
+| `GET` | `/repositories` | List caller-owned repositories |
+| `GET` | `/repositories/{repository_id}` | Read one repository |
+| `POST` | `/repositories/{repository_id}/index` | Create or reuse an index job |
+| `POST` | `/repositories/{repository_id}/embeddings/retry` | Retry a failed embedding run |
+| `GET` | `/jobs/{job_id}` | Read an owner-scoped job |
 
-### Import by GitHub ID
-
-```http
-POST /api/v1/repositories
-Content-Type: application/json
-```
+Register with exactly one identifier:
 
 ```json
-{
-  "github_id": "12345"
-}
+{ "github_id": "12345" }
 ```
 
-### Import by full name
+or:
 
 ```json
-{
-  "full_name": "octo/example"
-}
+{ "full_name": "owner/repository" }
 ```
 
-Exactly one identifier is required. The client must not send `clone_url`, `default_branch`, `visibility`, `status`, or `owner_id`; those values are fetched or assigned by the backend.
+The API fetches canonical GitHub metadata. It rejects client-supplied ownership, clone URL, visibility, status, and credentials.
 
-Successful response: `201 Created` with the persisted repository record. The initial status is `registered`.
-
-### List imported repositories
-
-```http
-GET /api/v1/repositories
-```
-
-### Read an imported repository
-
-```http
-GET /api/v1/repositories/{repository_id}
-```
-
-Repository list and detail responses are always scoped to the authenticated CodeDNA user.
-
-### Start repository indexing
+### Start indexing
 
 ```http
 POST /api/v1/repositories/{repository_id}/index
 ```
 
-This creates a durable job record, enqueues a Celery task through Redis, and returns immediately.
-The current task shallow-clones the repository into the worker workspace, discovers source file metadata, parses supported source files with Tree-sitter, extracts structured repository knowledge, builds semantic chunks from that persisted knowledge, records clone/index metadata, and completes successfully.
-It does not generate embeddings, build a graph, or call AI yet.
+The response is `202 Accepted` and contains a repository ID, job ID, and job status. The API enqueues Celery work through Redis; it does not clone or parse inside the request. The worker performs clone, inventory, incremental parsing, knowledge extraction, chunk rebuild, relationship derivation, history refresh, and optionally enqueues embeddings.
 
-Example response:
+## Repository explorer
 
-```json
-{
-  "repository_id": "00000000-0000-0000-0000-000000000002",
-  "job_id": "00000000-0000-0000-0000-000000000003",
-  "status": "queued"
-}
-```
+| Method | Endpoint | Query controls |
+| --- | --- | --- |
+| `GET` | `/repositories/{id}/files` | `page`, `page_size`, `language`, `extension`, `path_prefix` |
+| `GET` | `/repositories/{id}/stats` | — |
+| `GET` | `/repositories/{id}/parse-results` | `page`, `page_size`, `status`, `language`, `path_prefix` |
+| `GET` | `/repositories/{id}/knowledge` | `page`, `page_size`, `source_type`, `item_type`, `path_prefix` |
+| `GET` | `/repositories/{id}/chunks` | `page`, `page_size`, `source_type`, `chunk_type`, `search` |
+| `GET` | `/chunks/{chunk_id}` | — |
+| `GET` | `/repositories/{id}/history` | `limit` (`1`–`500`) |
 
-If the repository already has a queued or running index job, the API returns that existing job instead of enqueueing a duplicate.
+Files return inventory metadata rather than raw clone paths. Parse results expose Tree-sitter status, symbols, imports, diagnostics, and language details. Knowledge items provide extracted structured facts. Chunks are citation-ready semantic evidence with source range, content, type, and relationship metadata.
 
-### List discovered repository files
+The chunk listing `search` filter matches path, title, and content. Citation IDs are stable references used to open the exact persisted chunk and to connect answers back to their source evidence.
+
+## Retrieval
 
 ```http
-GET /api/v1/repositories/{repository_id}/files?page=1&page_size=100
+GET /api/v1/repositories/{repository_id}/search
 ```
 
-This returns file metadata discovered by the background indexing job. The endpoint is scoped to the authenticated owner and does not expose local clone paths or file contents.
+Required query parameter: `query` (1–1000 characters).
 
-Query parameters:
+Optional controls:
 
-| Parameter | Description | Default |
+| Parameter | Range / purpose |
+| --- | --- |
+| `source_type` | Limit evidence to a source category such as `source_code` or `documentation` |
+| `chunk_type` | Limit evidence to a semantic chunk type |
+| `limit` | `1`–`100`, default `20` |
+
+Retrieval combines lexical evidence with vector similarity when repository embeddings are available. It returns chunk evidence and per-result lexical/vector scores. If embeddings are unavailable or failed, lexical retrieval remains usable.
+
+## Graph and impact
+
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `page` | Positive page number | `1` |
-| `page_size` | `1` to `500` files per page | `100` |
-| `language` | Optional exact detected language filter | none |
-| `extension` | Optional extension filter, with or without `.` | none |
-| `path_prefix` | Optional repository-relative path prefix filter | none |
+| `GET` | `/repositories/{id}/graph` | Read repository-local relationship edges; `limit` is `1`–`2000` |
+| `GET` | `/repositories/{id}/impact` | Direct impact analysis by `path` |
+| `GET` | `/repositories/{id}/impact/traverse` | Bounded path traversal by `path` and `depth` |
+| `GET` | `/repositories/{id}/impact/symbol` | Bounded traversal by `stable_symbol_id` and `depth` |
 
-Example response:
+Traversal depth is one to three. These endpoints expose resolved static repository relationships; they do not guarantee discovery of dynamic imports, framework registration, reflection, or external-service dependencies.
 
-```json
-{
-  "files": [
-    {
-      "id": "00000000-0000-0000-0000-000000000004",
-      "repository_id": "00000000-0000-0000-0000-000000000002",
-      "path": "src/app.py",
-      "filename": "app.py",
-      "extension": "py",
-      "language": "Python",
-      "size_bytes": 1234,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "is_binary": false,
-      "discovered_at": "2026-07-18T00:00:00Z",
-      "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
-    }
-  ],
-  "page": 1,
-  "page_size": 100,
-  "has_next_page": false
-}
-```
+## Questions and impact explanations
 
-Known binary asset extensions, files larger than 10 MB, secret-like env files, dependency directories, build output, editor directories, and VCS directories are skipped during discovery. Other binary files are inventoried with `is_binary=true` and no detected source language.
-
-### List repository parse results
-
-```http
-GET /api/v1/repositories/{repository_id}/parse-results?page=1&page_size=100
-```
-
-This returns Tree-sitter parse metadata from the latest successful indexing job. Parse results are scoped to the authenticated owner.
-
-Query parameters:
-
-| Parameter | Description | Default |
+| Method | Endpoint | Body |
 | --- | --- | --- |
-| `page` | Positive page number | `1` |
-| `page_size` | `1` to `500` parse results per page | `100` |
-| `status` | Optional exact parse status filter | none |
-| `language` | Optional exact detected language filter | none |
-| `path_prefix` | Optional repository-relative path prefix filter | none |
+| `POST` | `/repositories/{id}/questions` | `question`, optional `impact_path`, optional `impact_depth` |
+| `POST` | `/repositories/{id}/impact/explain` | `path`, optional `question`, optional `depth` |
 
-Supported parse statuses:
+Question answers are generated from indexed evidence and include citations. Runtime, implementation, configuration, authentication, dependency, and impact questions prefer source-code evidence when it is available. Documentation may explain intended behavior, but it is not treated as proof of an unobserved runtime path.
+
+Question requests can return:
 
 | Status | Meaning |
 | --- | --- |
-| `parsed` | File parsed without Tree-sitter syntax errors |
-| `syntax_error` | Tree-sitter parsed the file but reported syntax errors |
-| `unsupported` | File is text but no grammar is configured yet |
-| `skipped` | File is binary and intentionally not parsed |
-| `failed` | Parser failed to read or parse the file |
-
-Example response:
-
-```json
-{
-  "parse_results": [
-    {
-      "id": "00000000-0000-0000-0000-000000000005",
-      "repository_id": "00000000-0000-0000-0000-000000000002",
-      "repository_file_id": "00000000-0000-0000-0000-000000000004",
-      "path": "src/app.py",
-      "language": "Python",
-      "parser": "python",
-      "status": "parsed",
-      "root_node_type": "module",
-      "has_error": false,
-      "error_count": 0,
-      "symbol_count": 1,
-      "import_count": 1,
-      "symbols": [
-        {
-          "name": "build",
-          "kind": "function",
-          "start_line": 3,
-          "end_line": 4
-        }
-      ],
-      "imports": [
-        {
-          "statement": "import os",
-          "start_line": 1,
-          "end_line": 1
-        }
-      ],
-      "parsed_at": "2026-07-18T00:00:00Z",
-      "error_message": null,
-      "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
-    }
-  ],
-  "page": 1,
-  "page_size": 100,
-  "has_next_page": false
-}
-```
-
-Current Tree-sitter support covers Python, JavaScript, TypeScript, and TSX. Unsupported text files still get a persisted status so the parser stage is auditable.
-
-### List repository knowledge items
-
-```http
-GET /api/v1/repositories/{repository_id}/knowledge?page=1&page_size=100
-```
-
-This returns structured knowledge extracted after inventory and parsing. The endpoint is scoped to the authenticated owner.
-
-Query parameters:
-
-| Parameter | Description | Default |
-| --- | --- | --- |
-| `page` | Positive page number | `1` |
-| `page_size` | `1` to `500` knowledge items per page | `100` |
-| `source_type` | Optional source filter: `source_code`, `documentation`, `database_schema`, or `configuration` | none |
-| `item_type` | Optional exact item type filter | none |
-| `path_prefix` | Optional repository-relative path prefix filter | none |
-
-Current extractors:
-
-| Source type | Extracted item types |
-| --- | --- |
-| `source_code` | `source_file`, `symbol`, `import` |
-| `documentation` | `document`, `document_section` |
-| `database_schema` | `prisma_schema`, `prisma_model`, `prisma_enum` |
-| `configuration` | `package_manifest`, `python_project`, `python_requirements`, `typescript_config`, `dockerfile`, `compose_config` |
-
-Example response:
-
-```json
-{
-  "knowledge_items": [
-    {
-      "id": "00000000-0000-0000-0000-000000000006",
-      "repository_id": "00000000-0000-0000-0000-000000000002",
-      "repository_file_id": "00000000-0000-0000-0000-000000000004",
-      "path": "README.md",
-      "source_type": "documentation",
-      "item_type": "document",
-      "name": "Project Guide",
-      "extractor": "documentation",
-      "data": {
-        "title": "Project Guide",
-        "heading_count": 4,
-        "link_count": 2,
-        "code_block_count": 1
-      },
-      "extracted_at": "2026-07-18T00:00:00Z",
-      "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
-    }
-  ],
-  "page": 1,
-  "page_size": 100,
-  "has_next_page": false
-}
-```
-
-### List repository chunks
-
-```http
-GET /api/v1/repositories/{repository_id}/chunks?page=1&page_size=100
-```
-
-Chunks are semantic documents built after knowledge extraction. Chunk building consumes persisted knowledge items and stored line ranges; it does not execute Tree-sitter again.
-
-| Parameter | Description | Default |
-| --- | --- | --- |
-| `page` | Positive page number | `1` |
-| `page_size` | `1` to `500` chunks per page | `100` |
-| `source_type` | Optional source filter | none |
-| `chunk_type` | Optional chunk filter: `class`, `function`, `source_file`, `documentation_section`, `prisma_model`, or `configuration` | none |
-
-### Read one chunk
-
-```http
-GET /api/v1/chunks/{chunk_id}
-```
-
-Both chunk endpoints are owner-scoped. A chunk response contains its source content, line range, language, stable identifier, and structured metadata for later embedding and retrieval stages. Function and class chunks include deterministic static-analysis facts and repository-local relationships when they can be resolved; unresolved relationship categories are empty lists.
-
-The knowledge and chunk layers intentionally stop before embeddings, vector search, graph generation, and AI orchestration.
-
-### Read repository inventory statistics
-
-```http
-GET /api/v1/repositories/{repository_id}/stats
-```
-
-This returns the persisted statistics from the latest successful inventory scan.
-
-Example response:
-
-```json
-{
-  "repository_id": "00000000-0000-0000-0000-000000000002",
-  "total_files": 1483,
-  "source_files": 1094,
-  "binary_files": 82,
-  "total_size_bytes": 18734562,
-  "languages": {
-    "Python": 512,
-    "TypeScript": 274,
-    "Markdown": 36
-  },
-  "last_scan_at": "2026-07-18T00:00:00Z"
-}
-```
-
-## Jobs
-
-### Read job status
-
-```http
-GET /api/v1/jobs/{job_id}
-```
-
-Job responses are scoped through repository ownership, so one user cannot read another user's job.
+| `429` | Answer-provider or configured answer-budget limit reached |
+| `502` | Answer provider failed |
+| `503` | Required answer or embedding configuration is unavailable |
 
 ## Health
 
@@ -393,15 +136,18 @@ GET /api/v1/live
 GET /api/v1/ready
 ```
 
-## Error Responses
+`ready` verifies the API's database and Redis dependencies.
+
+## Common errors
 
 | Status | Meaning |
 | --- | --- |
 | `401` | Missing/invalid CodeDNA JWT or missing GitHub authorization |
-| `404` | GitHub repository is not found/inaccessible, or local repository is not owned by the caller |
-| `409` | The caller already imported the GitHub repository |
-| `422` | Invalid query parameters or import payload |
-| `502` | GitHub API failure |
-| `503` | Indexing task could not be enqueued |
+| `404` | Resource missing, inaccessible on GitHub, or not owned by the caller |
+| `409` | Duplicate repository import or invalid embedding-retry state |
+| `422` | Invalid path, payload, or query parameter |
+| `429` | Answer request limited by provider/budget |
+| `502` | GitHub or answer-provider failure |
+| `503` | Queue, answer provider, or embedding configuration unavailable |
 
-Embeddings, graph generation, and AI orchestration are intentionally outside this milestone.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the worker and data-flow design, and [SETUP.md](../SETUP.md) for local setup.

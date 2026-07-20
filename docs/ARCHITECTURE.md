@@ -1,773 +1,135 @@
 # CodeDNA Architecture
 
-> **Version:** 1.0.0
-> **Project:** CodeDNA
-> **Status:** Design Phase
-> **Authors:** Team CodeDNA
+> **Status:** Current implementation
+> **Last reviewed:** 2026-07-20
 
----
+## Purpose
 
-# Vision
+CodeDNA indexes a GitHub repository and makes its implementation evidence searchable. It supports repository inventory, parsing, knowledge extraction, semantic chunks, embeddings, hybrid retrieval, relationship traversal, history artifacts, and grounded repository questions.
 
-CodeDNA is an AI-powered software intelligence platform that decodes the "DNA" of any software project.
+The product is an analysis tool, not a code editor or an autonomous code-writing agent. Answers are grounded in indexed repository chunks and return citations to the relevant path, line range, and chunk identifier.
 
-Instead of searching through thousands of files, developers can ask questions in natural language and receive answers backed by source code, commit history, pull requests, issues, documentation, and architectural context.
+## Running system
 
-The goal is not to generate code.
+```text
+Browser (Next.js, port 3333)
+        |
+        | CodeDNA JWT
+        v
+FastAPI application (port 8001)
+        |
+        +-- GitHub OAuth and repository APIs
+        +-- Browse APIs: files, parses, knowledge, chunks, history
+        +-- Retrieval, graph traversal, and question APIs
+        |
+        +-- Redis / Celery enqueue
+                 |
+                 v
+           Celery worker
+                 |
+                 +-- clone repository
+                 +-- inventory and incremental parse
+                 +-- knowledge extraction and chunks
+                 +-- history refresh
+                 +-- optional embedding task
+        |
+        v
+PostgreSQL + pgvector
+```
 
-The goal is to understand software.
+The API and worker are Python applications in `apps/api`. They are modular within one deployable API application; they are not separate microservices. Docker Compose runs the API, worker, Postgres, and Redis locally.
 
----
+## Ownership and authentication
 
-# Problem Statement
+GitHub OAuth begins at `GET /api/v1/auth/github/login`. The callback creates a CodeDNA JWT for the browser; the GitHub access token remains on the backend user record and is never returned to the frontend.
 
-Modern software projects grow rapidly.
+Protected routes use the CodeDNA JWT. `AuthContextMiddleware` opportunistically decodes a Bearer token into `request.state.auth`; protected route dependencies separately require a valid token and a `sub` claim. Repository reads and writes are owner-scoped, so a caller cannot access another user's imported repository data.
 
-A typical production repository contains:
+## Indexing flow
 
-- Hundreds of folders
-- Thousands of files
-- Years of commits
-- Pull requests
-- Issues
-- Documentation
-- Multiple contributors
+Indexing is asynchronous. `POST /api/v1/repositories/{repository_id}/index` creates or reuses a durable job, enqueues a Celery task through Redis, and returns `202 Accepted` without waiting for repository work.
 
-Understanding why a system exists is often more difficult than understanding how it works.
+```text
+Index request
+  ↓
+Job record + Celery enqueue
+  ↓
+Shallow clone (worker workspace)
+  ↓
+File inventory and change detection
+  ↓
+Tree-sitter parsing of changed supported files
+  ↓
+Structured knowledge extraction
+  ↓
+Semantic chunk rebuild + relationship edges
+  ↓
+GitHub history refresh
+  ↓
+Job complete; repository remains searchable
+  ↓
+Optional, separate embedding job
+```
 
-Current AI coding assistants primarily answer questions using source code alone.
+The worker preserves inventory and parses for unchanged files, then rebuilds analysis for changed paths and known dependent paths. Embedding failure does not invalidate the completed repository index: lexical search and browse APIs remain available.
 
-They generally ignore:
+## Data model and responsibilities
 
-- Architectural evolution
-- Commit history
-- Pull request discussions
-- Issue context
-- Dependency relationships
-- Engineering decisions
+| Layer | Primary stored records | Responsibility |
+| --- | --- | --- |
+| Repository | users, repositories, jobs | OAuth ownership, repository metadata, async job state |
+| Inventory | repository_files, repository_statistics | Safe file list, hashes, language hints, aggregate counts |
+| Parsing | repository_file_parses | Tree-sitter status, symbols, imports, diagnostics |
+| Knowledge | repository_knowledge_items | Extracted source, documentation, configuration, and schema facts |
+| Chunks | repository_chunks | Citation-ready semantic evidence with source ranges and metadata |
+| Embeddings | repository_chunk_embeddings | Vector representations for configured embedding provider/model |
+| Relationships | repository_relationship_edges | Repository-local resolved relationships used for graph and impact queries |
+| History | repository_history_artifacts | GitHub commit, issue, and pull-request artifacts when accessible |
+| Answers | repository_question_cache, repository_answer_usage | Cached grounded answers and provider-budget accounting |
 
-CodeDNA bridges this gap.
+PostgreSQL is the system of record. pgvector stores embedding vectors alongside repository data. Redis is used for Celery broker/backend communication; it is not the source of truth for repository analysis.
 
----
+## Retrieval, graph, and answers
 
-# Goals
+`GET /api/v1/repositories/{repository_id}/search` performs hybrid retrieval over indexed chunks. It combines lexical relevance with vector similarity when embeddings are available, applies optional source/chunk filters, and returns the evidence chunks and scores. If vector search is unavailable, the system can still return lexical results.
 
-Primary Goals
+Relationship edges are persisted relationally and exposed through graph and impact endpoints. Impact traversal is bounded by a caller-selected depth of one to three; its results are evidence, not a claim that all runtime dependencies have been discovered.
 
-- Understand any GitHub repository.
-- Explain software architecture.
-- Answer repository-specific questions.
-- Generate onboarding documentation.
-- Build repository knowledge graphs.
-- Perform semantic code search.
-- Explain engineering decisions.
-- Predict impact of code changes.
-
-Secondary Goals
-
-- Architecture visualization
-- Dependency analysis
-- Commit reasoning
-- Contributor insights
-- Timeline reconstruction
-
----
-
-# Non Goals
-
-CodeDNA is NOT
-
-- another IDE
-- another code editor
-- another autocomplete assistant
-- another GitHub clone
-
-It focuses exclusively on software understanding.
-
----
-
-# High Level Architecture
-
-                    Browser
-                       │
-               Next.js Frontend
-                       │
-                REST API Gateway
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
- Repository       Chat Service      Search
- Service
-        │
-        ▼
- Background Queue
-        │
-        ▼
- Repository Indexer
-        │
-        ▼
- Tree-sitter Parser
-        │
-        ▼
- Semantic Chunker
-        │
-        ▼
- Embedding Service
-        │
-        ▼
- PostgreSQL + pgvector
-        │
-        ▼
- Knowledge Graph
-        │
-        ▼
- AI Orchestrator
-        │
-        ▼
- GPT-5
-
----
-
-# Core Components
+`POST /api/v1/repositories/{repository_id}/questions` builds an answer from retrieved evidence. Runtime, implementation, configuration, authentication, dependency, and impact questions prefer source-code chunks first and fall back to mixed evidence only when source matches are unavailable. Documentation is treated as documented intent, not proof of runtime behavior. Answers include citations and respect cache, provider, token, and budget controls.
 
 ## Frontend
 
-Responsibilities
+The Next.js frontend provides GitHub sign-in, repository import, dashboard, repository explorer, retrieval search, graph/impact exploration, chunk citations, and repository Q&A. It calls the backend through `apps/web/lib/api.ts`, which centralizes the API base URL, JWT attachment, response parsing, and error handling.
 
-- Authentication
-- Dashboard
-- Repository Explorer
-- AI Chat
-- Architecture Graph
-- Timeline
-- Settings
+The repository explorer presents inventory, parse results, knowledge items, history artifacts, and chunks. It does not expose backend provider credentials, GitHub access tokens, local clone paths, or raw backend stack traces.
 
-Technology
+## Configuration and providers
 
-- Next.js
-- React
-- Tailwind
-- shadcn/ui
-- React Flow
+Configuration is loaded by `app.core.config.Settings` and placed on application state during app creation. The API initializes database and Redis clients in its lifespan; middleware and routers are registered before handling requests.
 
----
+The embedding service supports configured OpenAI or Google providers. The local default is OpenAI `text-embedding-3-small`. Repository answer generation also supports configured OpenAI or Google providers; the local default answer model is `gpt-5.4-mini`.
 
-## API Gateway
+Provider keys remain server-side. An absent embedding provider leaves the repository browseable and lexically searchable; an answer request returns a configuration error if no answer provider is available.
 
-Responsibilities
+## Explicit boundaries
 
-- Authentication
-- Authorization
-- Validation
-- Rate Limiting
-- Request Routing
+The following are not currently implemented as product guarantees:
 
-The gateway never performs AI tasks.
+- a separate LangGraph or multi-agent orchestration layer;
+- BullMQ or Node workers;
+- Neo4j storage;
+- live token streaming to the browser;
+- cross-repository analysis;
+- automatic architecture diagrams generated from unverified evidence;
+- exhaustive runtime dependency discovery for dynamic imports, reflection, framework magic, or external services.
 
-It forwards requests to the appropriate services.
+CodeDNA uses static repository evidence. It labels missing evidence instead of inventing callers, routes, or architecture.
 
----
+## Operational characteristics
 
-## Repository Service
+- API work that involves cloning, parsing, chunking, history, or embeddings runs in Celery workers.
+- Health endpoints are available at `/api/v1/health`, `/api/v1/live`, and `/api/v1/ready`.
+- The local Compose stack uses API port `8001` and web port `3333` when started with the documented environment values.
+- Owner checks apply to repository, job, chunk, retrieval, graph, history, and question operations.
 
-Responsibilities
-
-- Connect GitHub
-- Clone repositories
-- Validate URLs
-- Store metadata
-- Schedule indexing
-
-Endpoints
-
-POST /repositories
-
-GET /repositories
-
-DELETE /repositories/{id}
-
-POST /repositories/{id}/index
-
----
-
-## Background Workers
-
-Heavy operations never block the frontend.
-
-Examples
-
-- clone repository
-- parse repository
-- generate embeddings
-- build graph
-- refresh repository
-
-Queue
-
-Redis
-
-Workers
-
-BullMQ (Node)
-
-or
-
-Celery (Python)
-
----
-
-## Parser
-
-CodeDNA uses Tree-sitter.
-
-Responsibilities
-
-- Parse AST
-- Extract classes
-- Extract methods
-- Extract imports
-- Extract interfaces
-- Extract documentation
-
-This produces structured code rather than raw text.
-
----
-
-## Semantic Chunker
-
-Instead of fixed token chunking,
-
-the parser creates semantic chunks.
-
-Examples
-
-AuthenticationService
-
-↓
-
-Login()
-
-↓
-
-JWT Generation
-
-↓
-
-Middleware
-
-Each chunk becomes independently searchable.
-
----
-
-## Embedding Service
-
-Responsibilities
-
-- Generate embeddings
-- Store vectors
-- Refresh embeddings
-- Batch processing
-
-Current Model
-
-OpenAI text-embedding-3-large
-
-Future
-
-Support local models.
-
----
-
-## Search Service
-
-Hybrid Search
-
-Combines
-
-- Vector Search
-- BM25
-- Metadata Filtering
-
-Pipeline
-
-Query
-
-↓
-
-Embedding
-
-↓
-
-Vector Search
-
-↓
-
-Keyword Search
-
-↓
-
-Merge
-
-↓
-
-Rerank
-
-↓
-
-Return Context
-
----
-
-## Knowledge Graph
-
-Purpose
-
-Represent software relationships.
-
-Nodes
-
-Repository
-
-Folder
-
-File
-
-Class
-
-Function
-
-Commit
-
-Issue
-
-PR
-
-Edges
-
-Imports
-
-Calls
-
-Depends On
-
-Modified By
-
-Introduced In
-
-Discussed In
-
----
-
-## AI Orchestrator
-
-The orchestrator coordinates reasoning.
-
-Rather than asking GPT one huge prompt,
-
-multiple agents collaborate.
-
-Planner
-
-↓
-
-Retriever
-
-↓
-
-Architecture Agent
-
-↓
-
-Commit Agent
-
-↓
-
-Issue Agent
-
-↓
-
-Documentation Agent
-
-↓
-
-Answer Composer
-
-This architecture is implemented using LangGraph.
-
----
-
-# Repository Indexing Pipeline
-
-Step 1
-
-User submits GitHub URL
-
-↓
-
-Step 2
-
-Repository metadata validation
-
-↓
-
-Step 3
-
-Clone repository
-
-↓
-
-Step 4
-
-Tree-sitter parsing
-
-↓
-
-Step 5
-
-AST generation
-
-↓
-
-Step 6
-
-Semantic chunking
-
-↓
-
-Step 7
-
-Embedding generation
-
-↓
-
-Step 8
-
-Commit indexing
-
-↓
-
-Step 9
-
-Issue indexing
-
-↓
-
-Step 10
-
-Pull Request indexing
-
-↓
-
-Step 11
-
-Knowledge graph generation
-
-↓
-
-Repository Ready
-
----
-
-# Query Pipeline
-
-User Question
-
-↓
-
-Intent Detection
-
-↓
-
-Repository Retrieval
-
-↓
-
-Hybrid Search
-
-↓
-
-Context Compression
-
-↓
-
-Graph Lookup
-
-↓
-
-Prompt Construction
-
-↓
-
-GPT-5
-
-↓
-
-Answer with citations
-
----
-
-# AI Strategy
-
-CodeDNA follows Retrieval-Augmented Generation.
-
-The LLM never receives the entire repository.
-
-Instead,
-
-only relevant repository context is retrieved.
-
-Advantages
-
-- Lower cost
-- Better accuracy
-- Lower hallucination rate
-- Faster responses
-
----
-
-# Data Storage
-
-Primary Database
-
-PostgreSQL
-
-Stores
-
-Users
-
-Repositories
-
-Metadata
-
-Chats
-
-Messages
-
-Commits
-
-Issues
-
-PRs
-
----
-
-Vector Storage
-
-pgvector
-
-Stores
-
-Embeddings
-
----
-
-Cache
-
-Redis
-
-Stores
-
-Sessions
-
-Rate Limits
-
-Frequently Used Searches
-
-Repository Status
-
----
-
-Knowledge Graph
-
-Neo4j (Future)
-
-MVP
-
-Stored relationally.
-
----
-
-# Security
-
-Authentication
-
-GitHub OAuth
-
-Authorization
-
-JWT
-
-Repository Validation
-
-Repository Size Limits
-
-Prompt Injection Protection
-
-Rate Limiting
-
-Input Validation
-
----
-
-# Performance Strategy
-
-Repository indexing
-
-Background processing
-
-Caching
-
-Redis
-
-Streaming responses
-
-Server Sent Events
-
-Parallel embedding generation
-
-Batch indexing
-
----
-
-# Scalability
-
-Stateless API
-
-Horizontally scalable workers
-
-Independent embedding service
-
-Independent AI orchestration
-
-Containerized deployment
-
----
-
-# Failure Handling
-
-GitHub unavailable
-
-Retry
-
-OpenAI timeout
-
-Retry
-
-Embedding failure
-
-Skip chunk
-
-Continue indexing
-
-Worker crash
-
-Resume job
-
-Repository parsing failure
-
-Log file
-
-Continue remaining files
-
----
-
-# Observability
-
-Structured Logging
-
-OpenTelemetry
-
-Metrics
-
-Tracing
-
-Health Endpoints
-
-Worker Monitoring
-
----
-
-# Deployment
-
-Next.js
-
-↓
-
-FastAPI
-
-↓
-
-Redis
-
-↓
-
-PostgreSQL
-
-↓
-
-pgvector
-
-↓
-
-Workers
-
-↓
-
-Docker Compose
-
-Production
-
-↓
-
-Kubernetes
-
----
-
-# Future Roadmap
-
-Phase 1
-
-Repository Understanding
-
-Phase 2
-
-Knowledge Graph
-
-Phase 3
-
-Architecture Generation
-
-Phase 4
-
-Impact Prediction
-
-Phase 5
-
-Multi Repository Intelligence
-
-Phase 6
-
-Enterprise Integrations
-
----
-
-# Architecture Principles
-
-- API-first
-- Event-driven indexing
-- Background processing
-- AI-assisted reasoning
-- Stateless services
-- Modular design
-- Strong typing
-- Horizontal scalability
-- Security by default
-- Retrieval before generation
-
----
-
-# Summary
-
-CodeDNA is designed as a modular AI software intelligence platform rather than a traditional chatbot.
-
-Its architecture separates repository ingestion, semantic indexing, retrieval, reasoning, and presentation into independent services, enabling scalable repository understanding while keeping AI grounded in verifiable project context.
+For endpoint-level contracts, see [API.md](API.md). For setup, see [SETUP.md](../SETUP.md).
