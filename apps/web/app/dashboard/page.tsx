@@ -30,6 +30,7 @@ export default function Dashboard() {
 
   // Indexing status mapping (job_id -> status/info)
   const [activeJobs, setActiveJobs] = useState<Record<string, { repoId: string; status: string; error?: string }>>({});
+  const [dismissedFailureIds, setDismissedFailureIds] = useState<Set<string>>(new Set());
 
   // Polling intervals
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -59,6 +60,17 @@ export default function Dashboard() {
 
     fetchProfile();
   }, [router]);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("codedna_dismissed_index_failures") || "[]");
+      if (Array.isArray(stored)) {
+        setDismissedFailureIds(new Set(stored.filter((value): value is string => typeof value === "string")));
+      }
+    } catch {
+      localStorage.removeItem("codedna_dismissed_index_failures");
+    }
+  }, []);
 
   // Fetch imported repos from database
   const fetchImportedRepositories = async () => {
@@ -227,10 +239,20 @@ export default function Dashboard() {
     }
   };
 
+  const dismissFailureNotice = (repositoryIds: string[]) => {
+    setDismissedFailureIds((previous) => {
+      const next = new Set([...previous, ...repositoryIds]);
+      localStorage.setItem("codedna_dismissed_index_failures", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
   const filteredGithubRepos = githubRepos.filter((repo) =>
     repo.name.toLowerCase().includes(githubSearch.toLowerCase()) ||
     repo.full_name.toLowerCase().includes(githubSearch.toLowerCase())
   );
+  const failedRepositories = importedRepos.filter((repo) => repo.status === "failed");
+  const visibleFailedRepositories = failedRepositories.filter((repo) => !dismissedFailureIds.has(repo.id));
 
   const getStatusBadgeClass = (status: RepositoryStatus) => {
     switch (status) {
@@ -329,19 +351,19 @@ export default function Dashboard() {
             ) : (
               <>
                 {/* Failed-Job Panel */}
-                {importedRepos.some(r => r.status === "failed") && (
+                {visibleFailedRepositories.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-cards p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-200">
                     <div className="flex items-start gap-3">
                       <span className="text-lg pt-0.5">⚠️</span>
                       <div>
                         <h4 className="text-[15px] font-w500 text-red-900 font-sohne">Indexing Cycle Interrupted</h4>
                         <p className="text-[13px] text-red-700 mt-1 max-w-2xl">
-                          One or more repositories encountered issues during cloning or parser extraction. Raw tracebacks are hidden for security. You can safely trigger re-indexing below.
+                          One or more repositories could not finish indexing. Raw tracebacks are hidden for security; you can retry a repository below or dismiss this notice.
                         </p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 self-end md:self-auto">
-                      {importedRepos.filter(r => r.status === "failed").map(r => (
+                      {visibleFailedRepositories.map(r => (
                         <button
                           key={r.id}
                           onClick={() => handleStartIndexing(r.id)}
@@ -350,6 +372,13 @@ export default function Dashboard() {
                           Retry {r.name}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() => dismissFailureNotice(visibleFailedRepositories.map((repo) => repo.id))}
+                        className="h-8 px-3.5 rounded-buttons border border-red-200 bg-white text-red-800 hover:bg-red-100 text-[12px] font-w500 active:scale-95 transition-all cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
                     </div>
                   </div>
                 )}
