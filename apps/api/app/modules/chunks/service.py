@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.repository import Repository
@@ -164,6 +164,7 @@ class RepositoryChunkServiceImpl:
         page_size: int,
         source_type: str | None = None,
         chunk_type: str | None = None,
+        search: str | None = None,
     ) -> RepositoryChunkListResponse:
         await self._ensure_repository_owner(session, repository_id, owner_id)
         filters = [RepositoryChunk.repository_id == repository_id]
@@ -171,6 +172,13 @@ class RepositoryChunkServiceImpl:
             filters.append(RepositoryChunk.source_type == source_type)
         if chunk_type:
             filters.append(RepositoryChunk.chunk_type == chunk_type)
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            filters.append(or_(
+                RepositoryChunk.path.ilike(pattern),
+                RepositoryChunk.title.ilike(pattern),
+                RepositoryChunk.content.ilike(pattern),
+            ))
         result = await session.execute(
             select(RepositoryChunk)
             .where(*filters)

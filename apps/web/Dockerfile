@@ -2,6 +2,11 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
+# Next.js substitutes public environment variables while it builds the client
+# bundle. This must be a build argument, not only a runtime Compose variable.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8001
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 COPY package.json package-lock.json turbo.json ./
 COPY apps/web/package.json ./apps/web/package.json
 

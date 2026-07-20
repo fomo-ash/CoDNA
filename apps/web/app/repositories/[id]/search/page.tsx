@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, Suspense } from "react";
+import React, { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import api from "../../../../lib/api";
 import { User, Repository, RepositoryQuestionResponse, RepositorySearchResult, RepositorySearchResponse } from "../../../../types/api";
 import Header from "../../../../components/Header";
@@ -14,6 +16,8 @@ interface PageProps {
 function SearchContent({ repositoryId }: { repositoryId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const initialQuery = searchParams.get("q");
+  const loadedRouteRef = useRef<string | null>(null);
   
   const [user, setUser] = useState<User | null>(null);
   const [repo, setRepo] = useState<Repository | null>(null);
@@ -38,7 +42,39 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
   const [isAsking, setIsAsking] = useState(false);
   const [answerError, setAnswerError] = useState("");
 
+  const executeSearch = useCallback(async (q: string, srcT: string, chkT: string, lim: number) => {
+    if (!q.trim()) return;
+    setIsSearching(true);
+    setSearchError("");
+    setSearched(true);
+    try {
+      const response = await api.searchRepository(repositoryId, q, {
+        source_type: srcT || undefined,
+        chunk_type: chkT || undefined,
+        limit: lim,
+      });
+      setSearchResults(response.results || []);
+      setVectorSearchUsed(response.vector_search_used);
+
+      // Update URL silently
+      const url = new URL(window.location.href);
+      url.searchParams.set("q", q);
+      window.history.pushState({}, "", url.toString());
+    } catch (err: any) {
+      console.error("Retrieval search failed", err);
+      setSearchError(err.message || "Retrieval engine is currently unavailable. Please wait or try re-indexing.");
+    } finally {
+      setIsSearching(false);
+    }
+  }, [repositoryId]);
+
   useEffect(() => {
+    const routeKey = `${repositoryId}:${initialQuery ?? ""}`;
+    if (loadedRouteRef.current === routeKey) {
+      return;
+    }
+    loadedRouteRef.current = routeKey;
+
     const token = localStorage.getItem("codedna_jwt");
     if (!token) {
       setIsLoading(false);
@@ -54,11 +90,11 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
         const repository = await api.getRepository(repositoryId);
         setRepo(repository);
         
-        // Grab initial query from URL search parameters if present
-        const urlQ = searchParams.get("q");
-        if (urlQ) {
-          setQueryInput(urlQ);
-          executeSearch(urlQ, sourceType, chunkType, limit);
+        // Run the initial URL query once. `searchParams` itself is not stable
+        // across renders, so use its primitive value as the effect dependency.
+        if (initialQuery) {
+          setQueryInput(initialQuery);
+          executeSearch(initialQuery, "", "", 20);
         }
       } catch (err) {
         console.error("Failed to load repo for search", err);
@@ -68,33 +104,7 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
     };
 
     loadRepo();
-  }, [repositoryId, searchParams, router]);
-
-  const executeSearch = async (q: string, srcT: string, chkT: string, lim: number) => {
-    if (!q.trim()) return;
-    setIsSearching(true);
-    setSearchError("");
-    setSearched(true);
-    try {
-      const response = await api.searchRepository(repositoryId, q, {
-        source_type: srcT || undefined,
-        chunk_type: chkT || undefined,
-        limit: lim,
-      });
-      setSearchResults(response.results || []);
-      setVectorSearchUsed(response.vector_search_used);
-      
-      // Update URL silently
-      const url = new URL(window.location.href);
-      url.searchParams.set("q", q);
-      window.history.pushState({}, "", url.toString());
-    } catch (err: any) {
-      console.error("Retrieval search failed", err);
-      setSearchError(err.message || "Retrieval engine is currently unavailable. Please wait or try re-indexing.");
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  }, [executeSearch, initialQuery, repositoryId, router]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,22 +130,6 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
     setUser(null);
     router.push("/");
   };
-
-  const renderAnswer = (answerText: string) => answerText
-    .trim()
-    .split(/\n{2,}/)
-    .map((block, index) => {
-      const lines = block.split("\n").filter(Boolean);
-      const heading = lines.length === 1 && /^#{1,3}\s+/.test(lines[0]);
-      const bullets = lines.every((line) => /^[-*]\s+/.test(line));
-      if (heading) {
-        return <h3 key={index} className="mt-6 first:mt-0 text-[16px] font-w500 text-ink-black">{lines[0].replace(/^#{1,3}\s+/, "")}</h3>;
-      }
-      if (bullets) {
-        return <ul key={index} className="mt-3 list-disc space-y-1.5 pl-5 text-[14px] leading-6 text-ink-black">{lines.map((line, itemIndex) => <li key={itemIndex}>{line.replace(/^[-*]\s+/, "")}</li>)}</ul>;
-      }
-      return <p key={index} className="mt-3 first:mt-0 text-[14px] leading-6 text-ink-black">{lines.join(" ")}</p>;
-    });
 
   if (isLoading) {
     return (
@@ -279,7 +273,26 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
                 <span className={`rounded-buttons px-2.5 py-1 ${answer.vector_search_used ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{answer.vector_search_used ? "Hybrid evidence" : "Lexical evidence"}</span>
               </div>
               <article className="mt-4 rounded-xl border border-ink-black/[0.06] bg-paper-white p-5 shadow-subtle">
-                {renderAnswer(answer.answer)}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({ children }) => <h2 className="mt-6 first:mt-0 text-[20px] font-w500 text-ink-black">{children}</h2>,
+                    h2: ({ children }) => <h3 className="mt-6 first:mt-0 text-[17px] font-w500 text-ink-black">{children}</h3>,
+                    h3: ({ children }) => <h4 className="mt-5 first:mt-0 text-[15px] font-w500 text-ink-black">{children}</h4>,
+                    p: ({ children }) => <p className="mt-3 first:mt-0 text-[14px] leading-6 text-ink-black">{children}</p>,
+                    ul: ({ children }) => <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[14px] leading-6 text-ink-black">{children}</ul>,
+                    ol: ({ children }) => <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[14px] leading-6 text-ink-black">{children}</ol>,
+                    li: ({ children }) => <li className="pl-1">{children}</li>,
+                    a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-ink-black underline decoration-ink-black/30 underline-offset-2 hover:decoration-ink-black">{children}</a>,
+                    code: ({ children, className }) => {
+                      return <code className={className ? `${className} block whitespace-pre-wrap` : "rounded bg-mist-gray px-1 py-0.5 font-mono text-[12px] text-ink-black"}>{children}</code>;
+                    },
+                    pre: ({ children }) => <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-950 p-4 font-mono text-[12px] leading-6 text-slate-100">{children}</pre>,
+                    blockquote: ({ children }) => <blockquote className="mt-4 border-l-2 border-ink-black/20 pl-4 text-slate-gray">{children}</blockquote>,
+                  }}
+                >
+                  {answer.answer}
+                </ReactMarkdown>
               </article>
               {answer.citations.length > 0 && (
                 <div className="mt-5">
@@ -338,7 +351,7 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
               <div className="space-y-4">
                 {searchResults.map((result, idx) => {
                   const chunk = result.chunk;
-                  const scorePct = Math.round(result.score * 100);
+                  const scorePct = Math.min(100, Math.round(result.score * 100));
                   const lexicalPct = Math.round(result.lexical_score * 100);
                   const vectorPct = result.vector_score !== null ? Math.round(result.vector_score * 100) : null;
 

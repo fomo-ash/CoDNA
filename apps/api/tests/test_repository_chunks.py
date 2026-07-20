@@ -174,11 +174,13 @@ class FakeChunkEndpointService:
         self.error = error
         self.args = None
 
-    async def list_repository_chunks(self, session, repository_id, owner_id, page, page_size, source_type=None, chunk_type=None):
+    async def list_repository_chunks(
+        self, session, repository_id, owner_id, page, page_size, source_type=None, chunk_type=None, search=None,
+    ):
         del session
         if self.error:
             raise self.error
-        self.args = (repository_id, owner_id, page, page_size, source_type, chunk_type)
+        self.args = (repository_id, owner_id, page, page_size, source_type, chunk_type, search)
         return RepositoryChunkListResponse(chunks=[self._chunk()], page=page, page_size=page_size, has_next_page=False)
 
     async def get_chunk(self, session, chunk_id, owner_id):
@@ -202,10 +204,10 @@ def test_chunk_endpoints_filter_and_enforce_ownership() -> None:
     service = FakeChunkEndpointService()
     response = asyncio.run(list_repository_chunks(
         REPOSITORY_ID, page=2, page_size=20, source_type="documentation", chunk_type="documentation_section",
-        session=object(), service=service, current_user=SimpleNamespace(id=OWNER_ID),
+        search=None, session=object(), service=service, current_user=SimpleNamespace(id=OWNER_ID),
     ))
     assert response.chunks[0].title == "Install"
-    assert service.args == (REPOSITORY_ID, OWNER_ID, 2, 20, "documentation", "documentation_section")
+    assert service.args == (REPOSITORY_ID, OWNER_ID, 2, 20, "documentation", "documentation_section", None)
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(get_chunk(uuid4(), session=object(), service=FakeChunkEndpointService(RepositoryChunkNotFoundError()), current_user=SimpleNamespace(id=OWNER_ID)))

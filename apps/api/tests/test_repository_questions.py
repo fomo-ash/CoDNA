@@ -143,6 +143,9 @@ def test_question_uses_bounded_retrieval_and_returns_citations() -> None:
     assert "structure the explanation around those exact paths" in provider.prompt
     assert "never reverse that direction" in provider.prompt
     assert "You are CodeDNA" in provider.prompt
+    assert "Treat evidence scope as a first-class constraint" in provider.prompt
+    assert "Relevant observed subtree" in provider.prompt
+    assert "Do not call a dependency, component, route, client, or implementation" in provider.prompt
     assert len(usage_tracker.reservations) == 1
     assert usage_tracker.finalized[0][1:3] == (100, 20)
     assert usage_tracker.finalized[0][-1] == "completed"
@@ -211,6 +214,22 @@ def test_file_import_statements_are_available_to_answer_context() -> None:
     assert RepositoryQuestionService._file_import_statements({
         "file_imports": [{"statement": "import img1 from './img1.png'"}, {"source": "ignored"}]
     }) == ["import img1 from './img1.png'"]
+
+
+def test_relationship_context_exposes_only_indexed_relationships() -> None:
+    context = RepositoryQuestionService._relationship_context({
+        "relationships": {
+            "calls": [{"symbol": "run", "path": "helpers.py"}],
+            "called_by": [{"symbol": "worker.py::execute", "path": "worker.py"}],
+            "imports": [{"path": "helpers.py"}],
+            "references": [{"symbol": "unresolved_name"}],
+        }
+    })
+
+    assert "- calls: run (helpers.py)" in context
+    assert "- called by: worker.py::execute (worker.py)" in context
+    assert "- imports: helpers.py" in context
+    assert "- references: unresolved_name" in context
 
 
 def test_related_paths_include_local_imports_and_calls() -> None:

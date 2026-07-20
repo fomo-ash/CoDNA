@@ -8,6 +8,13 @@ CoDNA is an AI-powered software intelligence platform that enables developers to
 
 Instead of simply answering *what* the code does, CoDNA explains *why* it exists.
 
+## Run locally
+
+For the complete first-time setup, configuration, GitHub OAuth setup, indexing
+workflow, and troubleshooting guide, see [SETUP.md](SETUP.md). The local Docker
+environment serves the frontend at `http://localhost:3333` and the API at
+`http://localhost:8001`.
+
 ## Current Progress
 
 - ✅ Monorepo initialized

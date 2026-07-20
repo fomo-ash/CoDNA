@@ -25,13 +25,14 @@ async def list_repository_chunks(
     page_size: int = Query(100, ge=1, le=500),
     source_type: str | None = Query(None, min_length=1),
     chunk_type: str | None = Query(None, min_length=1),
+    search: str | None = Query(None, max_length=200),
     session: AsyncSession = Depends(get_db_session),
     service: RepositoryChunkServiceImpl = Depends(get_repository_chunk_service),
     current_user: User = Depends(get_current_user_record),
 ) -> RepositoryChunkListResponse:
     try:
         return await service.list_repository_chunks(
-            session, repository_id, current_user.id, page, page_size, source_type, chunk_type
+            session, repository_id, current_user.id, page, page_size, source_type, chunk_type, search
         )
     except RepositoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.") from exc

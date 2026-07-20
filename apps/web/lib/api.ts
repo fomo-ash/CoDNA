@@ -638,6 +638,7 @@ const mockApi = {
       page_size?: number;
       source_type?: string;
       chunk_type?: string;
+      search?: string;
     } = {}
   ): Promise<RepositoryChunkListResponse> => {
     const mockFiles = MOCK_FILES_BY_REPO[id] || MOCK_FILES_BY_REPO["default"];
@@ -1018,6 +1019,7 @@ export const api = USE_MOCK ? mockApi : {
       page_size?: number;
       source_type?: string;
       chunk_type?: string;
+      search?: string;
     } = {}
   ): Promise<RepositoryChunkListResponse> => {
     const searchParams = new URLSearchParams();
@@ -1025,6 +1027,7 @@ export const api = USE_MOCK ? mockApi : {
     if (params.page_size) searchParams.append("page_size", String(params.page_size));
     if (params.source_type) searchParams.append("source_type", params.source_type);
     if (params.chunk_type) searchParams.append("chunk_type", params.chunk_type);
+    if (params.search) searchParams.append("search", params.search);
 
     return request<RepositoryChunkListResponse>(`/repositories/${id}/chunks?${searchParams.toString()}`);
   },

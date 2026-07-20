@@ -28,6 +28,11 @@ def test_clone_repository_builds_safe_clone_command_and_uses_token_environment(t
 
     service = RepositoryCloneService(str(tmp_path), command_runner=fake_runner)
 
+    async def fake_read_revision(_clone_path: Path) -> str:
+        return "a" * 40
+
+    service._read_revision = fake_read_revision
+
     result = asyncio.run(
         service.clone_repository(
             RepositoryCloneTarget(
@@ -43,6 +48,7 @@ def test_clone_repository_builds_safe_clone_command_and_uses_token_environment(t
     env = recorded["env"]
 
     assert result.clone_path == tmp_path / str(REPOSITORY_ID)
+    assert result.revision == "a" * 40
     assert recorded["cwd"] == tmp_path
     assert command == [
         "git",

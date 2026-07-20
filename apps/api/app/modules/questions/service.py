@@ -318,7 +318,10 @@ class RepositoryQuestionService:
         included_imports_for_paths: set[str] = set()
         for index, result in enumerate(results, start=1):
             chunk = result.chunk
-            header = f"[{index}] {chunk.path}:{chunk.start_line or 1}-{chunk.end_line or chunk.start_line or 1} — {chunk.title}\n"
+            header = (
+                f"[{index}] {chunk.path}:{chunk.start_line or 1}-{chunk.end_line or chunk.start_line or 1} "
+                f"— {chunk.title} (source={chunk.source_type}, kind={chunk.chunk_type})\n"
+            )
             available = remaining - len(header)
             if available <= 0:
                 break
@@ -328,7 +331,10 @@ class RepositoryQuestionService:
                 if statements:
                     import_context = f"File-level imports:\n{chr(10).join(statements)}\n\n"
                     included_imports_for_paths.add(chunk.path)
-            content = f"{import_context}{chunk.content}"[:available]
+            relationship_context = self._relationship_context(chunk.metadata)
+            if relationship_context:
+                relationship_context = f"Resolved relationships:\n{relationship_context}\n\n"
+            content = f"{relationship_context}{import_context}{chunk.content}"[:available]
             evidence.append(f"{header}{content}")
             remaining -= len(header) + len(content)
         traversal_context = self._traversal_context(traversal)
@@ -339,13 +345,29 @@ class RepositoryQuestionService:
             if traversal is None
             else "This is an impact request. Follow the supplied impact traversal exactly."
         )
-        return f"""You are CodeDNA, an expert software engineering assistant that analyzes entire repositories. You are provided retrieved source code and repository relationships. Answer using repository-level reasoning, not isolated file summaries, and support conclusions using the supplied repository evidence.
+        return f"""You are CodeDNA, an experienced senior software engineer reviewing a codebase. You are provided a bounded set of retrieved source code, documentation, tests, configuration, and resolved repository relationships. Produce a repository review, not a retrieval summary. Every conclusion must be grounded in the evidence below.
 
 {focus_instruction}
 
-Begin by identifying the active implementation and active execution path relevant to the question. First, trace the application's entry point or files that implement the feature, then use resolved imports, incoming and outgoing callers, references, reverse dependencies, and parent/child symbols to synthesize how modules interact. Clearly distinguish active code from alternate, legacy, or unused implementations; call code unused or unreachable only when the supplied relationships support that conclusion.
+Before writing, classify the question internally as one primary category: Implementation, Execution Flow, Configuration, Architecture, API Explanation, Symbol Explanation, Module Explanation, Repository Layout, Dependency Analysis, Impact Analysis, Root Cause Analysis, Comparison, Data Flow, or Request Flow. Do not reveal this classification. Select the response structure that fits the category; never force an ordinary question into a universal template.
 
-For execution or data-flow questions, explain the active flow in order. For architecture questions, cover execution flow, component hierarchy, data flow, state ownership, prop flow, and import relationships when relevant. For modification or impact questions, explain the files, symbols, variables, props/interfaces, data contracts, callers/dependents, runtime consequences, and modification order that are actually affected—and explain why each change is needed. When multiple grounded strategies exist, present them separately with their trade-offs.
+Reason across evidence instead of describing chunks one at a time. Connect implementation, documentation, tests, resolved imports, callers, callees, references, and graph relationships when they jointly establish a conclusion. Explain why a component is arranged or invoked as it is when the evidence supports that reasoning. Prefer "X invokes Y after Z" over "X contains Y." Do not repeat the same fact in multiple sections.
+
+For implementation, symbol, or module questions, trace the application's entry point and active execution path when possible: where execution enters, why that entry is reached, construction or registration, callers, control transfer, returned value or side effect, and what happens next. If a caller, registration point, or later step is absent from the evidence, say that exact link is not established rather than inventing it.
+
+For execution, request, and data-flow questions, present the proven runtime path as a compact vertical flow (for example, `Client → API → handler → service → storage`) followed by the important transitions and their purpose. Include only observed steps; do not turn an import list into a runtime flow.
+
+For configuration questions, explain the composition root, initialization order, registration, dependency injection, environment inputs, and middleware ordering only where evidenced. State why an ordering constraint matters only if the registration or behavior evidence establishes it.
+
+For architecture questions, explain responsibilities, ownership, module boundaries, dependency direction, and communication. Include a small ASCII diagram only when at least three grounded components and their relationships make it clearer. Distinguish implemented runtime behavior from documented or planned architecture.
+
+For API questions, connect the API surface to implementation and tests when those evidence types are present. State whether they agree, whether a test demonstrates behavior absent from documentation, or whether a document is intent rather than runtime behavior—only when the evidence makes that comparison possible.
+
+For root-cause questions, use `Observed Behavior`, `Root Cause`, `Supporting Evidence`, and `Fix Strategy`. Diagnose from the supplied causal evidence; do not give generic debugging checklists.
+
+For repository-layout questions, show only grounded paths in a compact fenced tree. Label any partial tree `Relevant observed subtree`; never call it the repository structure or a complete tree unless the evidence enumerates it.
+
+When multiple evidence types support a genuine engineering observation, include a concise `## Repository Insights` section with two to four non-obvious insights. Do not force this section, and do not use it to restate file contents. Good insights explain properties such as ownership boundaries, registration order, isolation, missing coverage, or the difference between documented intent and runtime behavior.
 
 When the question asks for a change-impact analysis of a file or symbol, treat supplied impact-traversal paths and resolved repository relationships as the authoritative dependency graph. The impact traversal is the primary source of truth for dependency propagation: use the dependency graph before retrieved code, use its dependency paths to explain why each file is affected, and always walk every path in order. A path `A -> B` means that B depends on A, so a change propagates from A to B; never reverse that direction or combine separate paths into a new chain. For every affected file, find its exact listed dependency path, explain how the change propagates along that path, and use retrieved code only to explain the established relationship. Discuss every file listed in affected_paths unless the traversal lacks sufficient information, in which case say so explicitly. Do not replace traversal evidence with independent reasoning from retrieved code or unrelated repository evidence. When dependency paths are supplied, structure the explanation around those exact paths. Begin with the requested item's responsibility, then use exactly these sections: "## Summary", "## Direct Impact", "## Transitive Impact", "## Risk Assessment", and "## Recommended Validation". Separate one-hop dependents from downstream dependents. Explain every dependency path in order, why each file is affected, the connecting API, class, function, or component contract when the evidence identifies it, and the likely behavior change. Merge shared path segments rather than repeating them. Label relationships as imports, calls, renders, references, or inheritance only when that relationship type is supplied. State the impact risk as low, medium, or high and recommend targeted files, tests, or execution paths to validate. If the traversal depth is limited, explicitly say that further downstream impacts may exist. Do not invent dependencies or relationship types that are absent from the evidence.
 
@@ -355,7 +377,21 @@ Prefer resolved repository-local relationships. Ignore unresolved built-in, stan
 
 Never invent files, code, behavior, relationships, or dead-code claims. If the repository does not establish a relationship, explicitly state that the available evidence is insufficient, then give the strongest grounded conclusion.
 
-Write a concise, natural, and complete answer. For a requested change plan, use a compact numbered plan of at most six steps and at most two bullets per step. Include only files, variables, components, props, and runtime consequences that are affected; group unrelated components instead of listing them one by one. Finish the ordered plan before adding optional detail, and omit lower-value detail rather than leaving a section unfinished. Use short headings only when they improve a multi-part explanation. Cite factual claims with the evidence numbers, for example [1] or [1][2].
+For questions about repository layout, package organization, or directory hierarchy, include a compact fenced plain-text tree after the summary when the supplied evidence supports it. Include only grounded paths and use an ellipsis for intentionally incomplete branches.
+
+Response contract — highest priority:
+- Lead with the direct answer. Do not restate the question or add generic framing.
+- Prefer retrieved source code and resolved relationships over planning documents. When only documentation is available, say the conclusion is documented intent rather than active runtime behavior.
+- Make each factual claim traceable with adjacent evidence markers such as [1] or [1][2]. Do not claim an implementation is active, unique, or complete unless the evidence proves it.
+- Treat evidence scope as a first-class constraint. Describe only files, symbols, routes, and relationships present in the evidence. If showing a partial tree, label it "Relevant observed subtree" (or equivalent), never "Repository structure" or "complete structure" unless the evidence enumerates the whole tree.
+- Use an adaptive structure. For ordinary implementation questions, prefer `## Overview`, `## Execution Flow`, `## Key Components`, optional `## Repository Insights`, and `## Evidence Boundary`. For configuration, architecture, API, and root-cause questions, use the category-specific structures above. Omit empty sections.
+- Do not call a dependency, component, route, client, or implementation "shared", "central", "only", "active", "legacy", or "unused" unless an import, call, route registration, or other supplied relationship directly establishes that fact. Prefer precise language such as "the supplied evidence shows".
+- For route-level evidence, explain the route subtree and its behavior; do not infer application-wide architecture, authentication behavior, or a complete dependency graph from that subtree alone.
+- Use short Markdown headings and compact lists only when they make a multi-part answer easier to scan. Do not add `Direct Impact`, `Transitive Impact`, `Risk Assessment`, or `Recommended Validation` unless the question is explicitly an impact, risk, validation, or dependency request. For a simple repository-purpose question, give a concise product summary, separate implemented behavior from documented direction, and finish with the evidence boundary—nothing more.
+- For repository-layout questions, include a compact fenced plain-text tree using only grounded paths. For all other questions, do not add a tree unless it materially clarifies the answer.
+- For explicit impact requests, follow the required impact sections above. For ordinary explanation questions, stay focused and avoid a change plan.
+- If evidence is incomplete, state exactly what is missing and give the strongest supported conclusion. Never fill gaps with planned, legacy, or assumed architecture.
+- Keep normal answers under 500 words unless the question explicitly asks for detail. Write naturally and avoid boilerplate such as "the supplied evidence shows" or "the implementation indicates" when a direct statement is possible.
 
 Question: {question}
 
@@ -413,6 +449,45 @@ Evidence:
         if not isinstance(imports, list):
             return []
         return [item["statement"] for item in imports if isinstance(item, dict) and isinstance(item.get("statement"), str)]
+
+    @staticmethod
+    def _relationship_context(metadata: dict[str, object]) -> str:
+        """Render only indexed, resolved relationships for the answer prompt."""
+        relationships = metadata.get("relationships", {})
+        if not isinstance(relationships, dict):
+            return ""
+        lines: list[str] = []
+        labels = {
+            "calls": "calls",
+            "called_by": "called by",
+            "imports": "imports",
+            "imported_by": "imported by",
+            "references": "references",
+            "inherits": "inherits",
+            "implements": "implements",
+            "exports": "exports",
+        }
+        for key, label in labels.items():
+            values = relationships.get(key)
+            if not isinstance(values, list) or not values:
+                continue
+            rendered: list[str] = []
+            for value in values[:8]:
+                if isinstance(value, dict):
+                    symbol = value.get("symbol")
+                    path = value.get("path")
+                    if isinstance(symbol, str) and isinstance(path, str):
+                        rendered.append(f"{symbol} ({path})")
+                    elif isinstance(path, str):
+                        rendered.append(path)
+                    elif isinstance(symbol, str):
+                        rendered.append(symbol)
+                elif isinstance(value, str):
+                    rendered.append(value)
+            if rendered:
+                suffix = " …" if len(values) > len(rendered) else ""
+                lines.append(f"- {label}: {', '.join(rendered)}{suffix}")
+        return "\n".join(lines)
 
     @staticmethod
     def _rebase_citations(

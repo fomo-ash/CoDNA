@@ -51,6 +51,11 @@ def make_repository_read() -> RepositoryRead:
         status=RepositoryStatus.REGISTERED,
         last_cloned_at=None,
         last_indexed_at=None,
+        embedding_status="pending",
+        embedding_chunk_count=0,
+        embedding_error_message=None,
+        embedding_started_at=None,
+        embedding_completed_at=None,
         created_at=timestamp,
         updated_at=timestamp,
     )

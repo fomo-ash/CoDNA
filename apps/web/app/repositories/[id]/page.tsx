@@ -67,6 +67,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
   const [historyArtifacts, setHistoryArtifacts] = useState<RepositoryHistoryArtifact[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
+  const [historySearch, setHistorySearch] = useState("");
 
   // --- Tab 5: Chunks Index States ---
   const [chunks, setChunks] = useState<RepositoryChunkRead[]>([]);
@@ -76,6 +77,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
   const [isChunksLoading, setIsChunksLoading] = useState(false);
   const [chunkSourceFilter, setChunkSourceFilter] = useState("");
   const [chunkTypeFilter, setChunkTypeFilter] = useState("");
+  const [chunkSearch, setChunkSearch] = useState("");
   const [selectedChunk, setSelectedChunk] = useState<RepositoryChunkRead | null>(null);
   const [isChunkDetailLoading, setIsChunkDetailLoading] = useState(false);
 
@@ -229,6 +231,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
           page_size: chunksPageSize,
           source_type: chunkSourceFilter || undefined,
           chunk_type: chunkTypeFilter || undefined,
+          search: chunkSearch || undefined,
         });
         setChunks(res.chunks || []);
         setHasNextChunksPage(res.has_next_page);
@@ -240,7 +243,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
     };
 
     fetchChunks();
-  }, [id, repo, activeTab, chunksPage, chunkSourceFilter, chunkTypeFilter, chunksPageSize]);
+  }, [id, repo, activeTab, chunksPage, chunkSourceFilter, chunkTypeFilter, chunkSearch, chunksPageSize]);
 
   // Fetch full details for a selected chunk
   const handleChunkSelect = async (chunkId: string) => {
@@ -282,6 +285,22 @@ function RepositoryDetailsContent({ params }: PageProps) {
     navigator.clipboard.writeText(text);
     alert("Copied the citation ID. Use it to refer to this exact indexed chunk in a question, note, or bug report.");
   };
+
+  const normalizedHistorySearch = historySearch.trim().toLowerCase();
+  const filteredHistoryArtifacts = historyArtifacts.filter((artifact) => {
+    if (historyTypeFilter !== "all" && artifact.artifact_type !== historyTypeFilter) return false;
+    if (!normalizedHistorySearch) return true;
+    return [
+      artifact.title,
+      artifact.body,
+      artifact.author_login,
+      artifact.external_id,
+      artifact.path,
+      artifact.artifact_type,
+      artifact.data?.state,
+      ...(artifact.data?.labels || []),
+    ].some((value) => value?.toLowerCase().includes(normalizedHistorySearch));
+  });
 
   const handleLogout = () => {
     localStorage.removeItem("codedna_jwt");
@@ -847,20 +866,28 @@ function RepositoryDetailsContent({ params }: PageProps) {
                     <span className="text-[12px] font-w500 uppercase tracking-wider text-ash-gray">Repository history</span>
                     <p className="mt-1 text-[13px] text-slate-gray">Commits, pull requests, and issues captured during the latest index.</p>
                   </div>
-                  <select value={historyTypeFilter} onChange={(event) => setHistoryTypeFilter(event.target.value)} className="rounded-inputs border border-ink-black/[0.1] bg-paper-white px-3 py-2 text-[13px]">
-                    <option value="all">All activity</option>
-                    <option value="commit">Commits</option>
-                    <option value="pull_request">Pull requests</option>
-                    <option value="issue">Issues</option>
-                  </select>
+                  <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+                    <input
+                      value={historySearch}
+                      onChange={(event) => setHistorySearch(event.target.value)}
+                      placeholder="Search PRs, issues, commits..."
+                      className="h-[36px] min-w-0 rounded-inputs border border-ink-black/[0.1] bg-paper-white px-3 text-[13px] md:w-[240px]"
+                    />
+                    <select value={historyTypeFilter} onChange={(event) => setHistoryTypeFilter(event.target.value)} className="h-[36px] rounded-inputs border border-ink-black/[0.1] bg-paper-white px-3 text-[13px]">
+                      <option value="all">All activity</option>
+                      <option value="commit">Commits</option>
+                      <option value="pull_request">Pull requests</option>
+                      <option value="issue">Issues</option>
+                    </select>
+                  </div>
                 </div>
                 {isHistoryLoading ? (
                   <div className="py-20 text-center text-slate-gray">Loading decision history...</div>
-                ) : historyArtifacts.filter((artifact) => historyTypeFilter === "all" || artifact.artifact_type === historyTypeFilter).length === 0 ? (
-                  <div className="rounded-cards border border-dashed border-ink-black/[0.08] bg-fog-white py-16 text-center text-slate-gray">No history artifacts are available yet. Re-index to refresh commits, pull requests, and issues.</div>
+                ) : filteredHistoryArtifacts.length === 0 ? (
+                  <div className="rounded-cards border border-dashed border-ink-black/[0.08] bg-fog-white py-16 text-center text-slate-gray">No history artifacts match your filters.</div>
                 ) : (
                   <div className="space-y-3">
-                    {historyArtifacts.filter((artifact) => historyTypeFilter === "all" || artifact.artifact_type === historyTypeFilter).map((artifact) => (
+                    {filteredHistoryArtifacts.map((artifact) => (
                       <a key={artifact.id} href={artifact.url} target="_blank" rel="noreferrer" className="block rounded-cards border border-ink-black/[0.05] bg-paper-white p-4 shadow-subtle transition-colors hover:bg-fog-white">
                         <div className="flex flex-wrap items-center gap-2 text-[11px] font-w500 uppercase tracking-wider">
                           <span className="rounded-buttons bg-mist-gray px-2 py-1 text-slate-gray">{artifact.artifact_type.replace("_", " ")}</span>
@@ -889,6 +916,15 @@ function RepositoryDetailsContent({ params }: PageProps) {
                     <span className="text-[12px] font-sohne font-w500 text-ash-gray uppercase tracking-wider block">
                       Filters
                     </span>
+                    <input
+                      value={chunkSearch}
+                      onChange={(event) => {
+                        setChunkSearch(event.target.value);
+                        setChunksPage(1);
+                      }}
+                      placeholder="Search chunks by symbol, path, or content..."
+                      className="h-[40px] w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 text-[13px] font-sohne text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black"
+                    />
                     <div className="grid grid-cols-2 gap-[12px]">
                       <select
                         value={chunkSourceFilter}
@@ -1039,7 +1075,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
                         <button
                           onClick={() => copyToClipboard(selectedChunk.metadata?.stable_symbol_id || selectedChunk.id)}
                           title="Copy this stable reference to the clipboard"
-                          className="h-8 px-3 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 text-xs font-w500 flex-shrink-0 transition-all cursor-pointer"
+                          className="h-[32px] px-3 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 text-xs font-w500 flex-shrink-0 transition-all cursor-pointer"
                         >
                           Copy citation ID
                         </button>

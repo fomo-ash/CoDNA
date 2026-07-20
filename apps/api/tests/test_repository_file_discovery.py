@@ -393,6 +393,7 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
         id=REPOSITORY_ID,
         status=None,
         clone_url="https://github.com/octo/repo.git",
+        full_name="octo/repo",
         default_branch="main",
         visibility="public",
         clone_path=None,
@@ -458,6 +459,15 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
             persisted["chunk_paths"] = paths
             return 0
 
+    class FakeHistoryService:
+        def __init__(self, _client) -> None:
+            pass
+
+        async def refresh(self, session, repository_id, full_name, access_token):
+            del session
+            persisted["history"] = (repository_id, full_name, access_token)
+            return 0
+
     async def fake_to_thread(function, *args):
         return function(*args)
 
@@ -501,6 +511,7 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     monkeypatch.setattr(tasks, "RepositoryParserServiceImpl", FakeParserService)
     monkeypatch.setattr(tasks, "RepositoryKnowledgeServiceImpl", FakeKnowledgeService)
     monkeypatch.setattr(tasks, "RepositoryChunkServiceImpl", FakeChunkService)
+    monkeypatch.setattr(tasks, "RepositoryHistoryService", FakeHistoryService)
     monkeypatch.setattr(
         tasks,
         "_parse_repository_in_subprocess",
@@ -534,6 +545,7 @@ def test_worker_success_path_discovers_and_persists_inventory(monkeypatch, tmp_p
     assert persisted["chunk_repository_id"] == REPOSITORY_ID
     assert persisted["chunk_repository_path"] == tmp_path
     assert persisted["chunk_paths"] == {"app.py"}
+    assert persisted["history"] == (REPOSITORY_ID, "octo/repo", "token")
 
 
 def test_worker_failure_path_marks_job_and_repository_failed(monkeypatch, tmp_path) -> None:
