@@ -146,6 +146,9 @@ def test_question_uses_bounded_retrieval_and_returns_citations() -> None:
     assert "Treat evidence scope as a first-class constraint" in provider.prompt
     assert "Relevant observed subtree" in provider.prompt
     assert "Do not call a dependency, component, route, client, or implementation" in provider.prompt
+    assert "No downstream dependency is established by the indexed graph" in provider.prompt
+    assert "do not treat documentation, TypeScript compilation scope" in provider.prompt
+    assert "Do not add a standalone `Evidence` heading" in provider.prompt
     assert len(usage_tracker.reservations) == 1
     assert usage_tracker.finalized[0][1:3] == (100, 20)
     assert usage_tracker.finalized[0][-1] == "completed"
