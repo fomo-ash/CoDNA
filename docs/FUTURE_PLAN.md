@@ -1,105 +1,56 @@
 # CodeDNA Delivery Plan
 
-## Current State
+> **Status:** Current implementation and next work
+> **Last reviewed:** 2026-07-20
 
-Repository indexing now creates durable inventory, parse results, extracted knowledge items, and repository-aware semantic chunks. Chunks include source content, source ranges, stable identifiers, static-analysis metadata, and deterministic local relationships. Chunk embeddings and owner-scoped hybrid retrieval are available.
+## Current state
 
-Repository relationship metadata is now materialized as repository-scoped graph edges during indexing. Direct graph and path-impact APIs preserve unresolved links explicitly. Repository-history ingestion and incremental indexing remain future work. Repository questions return citation-first, repository-aware answers with a global spend guard and repeat-question cache.
+CodeDNA currently supports GitHub OAuth, owner-scoped repository registration, asynchronous Celery indexing, safe inventory, Tree-sitter parsing, structured knowledge extraction, semantic chunks, repository-local relationship edges, history artifacts, incremental re-indexing, optional pgvector embeddings, hybrid retrieval, graph/impact traversal, and cited repository Q&A.
 
-## Product Positioning and Differentiation
+The browser already includes repository import, indexing status, explorer tabs for files/parses/knowledge/history/chunks, retrieval search, impact controls, chunk citation links, and question answering when a provider is configured.
 
-CodeDNA is not "chat with a codebase." It explains why a codebase is shaped the
-way it is, using source-backed evidence and change-impact context.
+## Product principles
 
-The product must make this promise concrete:
+- Prefer source evidence for runtime and implementation questions; use documentation as intent, not runtime proof.
+- Cite repository path, line range, and stable chunk ID for generated answers.
+- Preserve unresolved or dynamic relationships as unresolved rather than inventing a dependency path.
+- Keep provider keys and GitHub tokens server-side; scope repository data to its owner.
+- Keep lexical retrieval available when embeddings or a model provider are unavailable.
+- Re-index incrementally, and invalidate answer cache entries when indexed evidence changes.
 
-- Every answer is citation-first: repository path, exact line range, and stable chunk ID.
-- Answers use structured repository knowledge, not an unbounded dump of source files.
-- Dependency, caller, importer, reference, and impact paths are first-class product data.
-- Repository history, pull requests, issues, and documented decisions eventually explain *why*, not only *what*.
-- Private repository data remains owner-scoped and provider credentials are never persisted.
-- Re-indexing changed repositories is incremental, keeping repeat use fast and model costs bounded.
+## Next priorities
 
-## Cost and Reliability Principles
+### 1. Evaluation and answer quality
 
-- Generate an embedding only when a chunk source hash or revision changes; never on every search.
-- Use lexical retrieval and metadata filters before vector search, then pass only bounded top results to an LLM.
-- Cache repeat retrieval and answer requests where safe, with explicit invalidation after indexing.
-- Use the least expensive capable model for routing and extraction; reserve answer-generation models for final responses.
-- Enforce application-level per-user and per-repository request, context, and spend limits before public chat is enabled.
-- Track provider usage without storing API keys, raw access tokens, or private repository credentials.
+- Add representative repository fixtures and scored evaluations for citation coverage, factuality, evidence boundaries, and answer usefulness.
+- Test source-first versus documentation-first retrieval decisions across runtime, configuration, architecture, and API questions.
+- Improve graceful handling for missing evidence, dynamic framework wiring, and unresolved imports.
 
-## Next Backend Milestones
+### 2. Graph confidence and explanation
 
-### 1. Embeddings and Retrieval
+- Validate multi-hop path and symbol-impact traversal across representative Python and TypeScript repositories.
+- Add confidence and relationship-kind explanations without presenting static analysis as complete runtime discovery.
+- Make graph evidence easier to inspect from a cited chunk or impact result.
 
-- Completed 2026-07-19: chunk embedding job reads `repository_chunks` only.
-- Completed 2026-07-19: vectors are stored by chunk ID in PostgreSQL/pgvector with repository, source-type, and chunk-type filters.
-- Completed 2026-07-19: repository-scoped hybrid lexical/vector retrieval is available at `GET /api/v1/repositories/{repository_id}/search`.
-- Completed 2026-07-19: embedding generation is idempotent by source hash and embedding model.
-- Completed 2026-07-19: exact code-symbol queries boost matching chunk titles, so a class or function definition ranks ahead of files that only import or use it.
+### 3. History and decision context
 
-### 2. Repository Question API
+- Link commits, issues, and pull requests to paths, chunks, and symbols only when repository evidence supports the connection.
+- Add timeline-oriented exploration and combined source/history answers for questions about why a change exists.
 
-- Completed 2026-07-19: `POST /api/v1/repositories/{repository_id}/questions` retrieves bounded evidence before generating an answer; search remains available as the transparent evidence API.
-- Completed 2026-07-19: answers are citation-first, return only cited chunks with paths and line ranges, and rebase citations to a contiguous order.
-- Completed 2026-07-19: direct local imports and calls expand answer context within a strict related-chunk cap, enabling repository-aware active-path reasoning without graph persistence.
-- Completed 2026-07-19: answer policies distinguish active versus alternate paths when supported, provide bounded architecture/impact reasoning, and avoid unsupported dead-code claims.
-- Completed 2026-07-19: safe usage telemetry stores provider, model, token counts, cost, and status only; prompts, answers, credentials, and private tokens are not stored as telemetry.
-- Completed 2026-07-19: a global project-level $4 answer budget reserves worst-case cost before provider calls and records actual cost afterward.
-- Completed 2026-07-19: normalized repeat questions use a citation-preserving cache; cache entries are invalidated after repository re-indexing and answer-policy changes.
+### 4. Product hardening
 
-### 3. Persistent Relationship Graph
+- Add browser-level end-to-end coverage for sign-in, import, indexing, retrieval, impact, and cited answers.
+- Add production-ready rate limits, quotas, auditability, retention/deletion controls, backups, monitoring, and alerting.
+- Validate deployment with HTTPS OAuth callbacks, restricted CORS origins, durable worker storage, and explicit cost limits.
 
-- Completed 2026-07-19: materialize imports, calls, references, inheritance, and implementation relationships into `repository_relationship_edges` during indexing.
-- Completed 2026-07-19: add owner-scoped direct graph and path-impact endpoints, preserving unresolved targets as unresolved facts.
-- Next: add bounded multi-hop traversal and symbol-level impact views after representative repository validation.
-- Preserve unresolved and dynamic relationships as probabilistic or unresolved facts rather than asserting them as certain.
+### 5. Broader repository support
 
-### 4. Incremental Indexing
+- Add more language parsers and improve import resolution for aliases, package layouts, and framework conventions.
+- Add organization-aware access controls and carefully scoped cross-repository workflows.
+- Explore an IDE extension that surfaces repository-aware search, impact paths, history, and cited answers beside the current file.
 
-- Compare repository revision and file hashes before parsing.
-- Rebuild knowledge and chunks only for changed files plus affected relationship edges.
-- Delete stale rows for removed files in the same transaction.
+## Explicit non-goals for the next release
 
-### 5. Repository History and Decision Context
-
-- Ingest owner-authorized commit history, pull requests, issues, and discussion metadata.
-- Link historical artifacts to affected paths, chunks, symbols, and relationships where evidence supports it.
-- Distinguish facts from inferred rationale; preserve uncertainty when links are incomplete.
-- Add timeline and "why does this exist?" retrieval that returns source and history citations together.
-
-## Frontend Integration Plan
-
-### 1. Repository Indexing View
-
-- List imported repositories and current job/repository status.
-- Start indexing and poll the existing job endpoint until completion or failure.
-- Present safe worker error summaries and a retry action.
-
-### 2. Repository Explorer
-
-- Add inventory, parse-result, knowledge-item, and chunk tabs using the existing owner-scoped APIs.
-- Show chunk metadata, source content, relationships, and source line ranges.
-- Link relationship targets to their matching chunk where a stable ID resolves.
-
-### 3. Search and Chat
-
-- Build these only after the retrieval API is complete.
-- Keep UI answers citation-first: each answer links to repository path, line range, and chunk ID.
-- Do not call model providers directly from the browser.
-- Show cost-safe limits and clear retry states without exposing provider details.
-
-### 4. Architecture and Impact
-
-- Build an impact view from persistent graph traversal: callers, imports, references, and affected chunks.
-- Make every graph node linkable back to a repository path, line range, and stable chunk ID.
-- Add a timeline view only after repository history and decision context are available.
-
-## Release Checklist
-
-- Run backend tests and database migrations in CI.
-- Re-index representative Python, TypeScript, documentation-heavy, Prisma, and configuration-heavy repositories.
-- Verify chunk metadata for imports, calls, references, exports, and unresolved relationships.
-- Verify private repository access remains owner-scoped.
-- Build and smoke-test API, worker, migrate, and frontend containers before deployment.
+- Do not claim exhaustive runtime dependency analysis from static evidence.
+- Do not expose GitHub tokens or model-provider credentials to the browser.
+- Do not make public deployment the default until request, spend, and retention controls are in place.

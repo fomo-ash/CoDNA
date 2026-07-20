@@ -32,21 +32,20 @@ Accuracy is the most important requirement for a tool that explains code.
 - Strengthen retrieval with file-, path-, and symbol-aware search, along with better ranking and filtering.
 - Test answers against known repositories and regression cases before shipping model or retrieval changes.
 
-## 4. Private Repository Support
+## 4. Private Repository Hardening
 
-Private repositories are a major next step for teams that need repository intelligence on their own work.
+GitHub-authorized private repository access and owner-scoped records are already supported locally. The next step is production hardening.
 
-- Support GitHub-authorized access to private repositories with explicit user consent.
-- Enforce repository ownership checks and strict isolation between users and organizations.
-- Keep GitHub tokens, provider keys, and session credentials server-side and out of the browser.
+- Validate private cloning and history retrieval across representative organizations and permission changes.
 - Add clear controls for repository deletion, data retention, re-indexing, and export.
 - Provide audit logs, rate limits, quotas, and per-user spending safeguards for production use.
+- Keep GitHub tokens, provider keys, and session credentials server-side and out of the browser.
 
 ## 5. A Richer Repository View
 
 We will continue making CodeDNA more useful beyond a single question-and-answer interaction.
 
-- Add per-file and symbol-level history, including when code was introduced or changed.
+- Link existing history artifacts to files and symbols, including when code was introduced or changed.
 - Connect commits, pull requests, issues, changed files, and code chunks into a navigable engineering timeline.
 - Improve impact analysis so developers can see which files and symbols may be affected by a change.
 - Add clearer indexing status, retry controls, and graceful lexical-only behavior when semantic features are not configured.

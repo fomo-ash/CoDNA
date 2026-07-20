@@ -8,7 +8,7 @@ ask a cited question.
 
 - Git and Docker Desktop with Docker Compose v2 running.
 - A GitHub OAuth app (needed for sign-in and repository discovery).
-- An OpenAI API key for embeddings and generated answers.
+- An OpenAI API key for the default embedding and answer providers, or a Google API key when using the supported Gemini alternative.
 
 The Docker setup installs Node and Python dependencies inside containers, so
 Node.js and Python are not required on the host.
@@ -132,7 +132,7 @@ docker compose logs -f api
 | GitHub says the callback URL is invalid | The GitHub OAuth app and `GITHUB_CALLBACK_URL` must both use `http://localhost:3333/auth/callback`. |
 | The browser cannot reach the API | Confirm `NEXT_PUBLIC_API_URL=http://localhost:8001`, then run `docker compose up -d --build web`. |
 | Sign-in succeeds but the browser reports CORS | Set `FRONTEND_URL=http://localhost:3333` in `apps/api/.env`, then rebuild/restart `api`. |
-| Indexing fails before search works | Check that the selected embedding provider has its matching API key (`OPENAI_API_KEY` by default; `GOOGLE_API_KEY` for Gemini), then inspect worker logs. |
+| Indexing fails | Inspect worker logs. Missing embedding credentials do not block inventory, parsing, chunks, or lexical search; they only prevent vector embeddings. |
 | Answers fail but search results exist | Check the key for `ANSWER_PROVIDER`—the default OpenAI answer provider needs `OPENAI_API_KEY`. |
 | A port is in use | Change `API_PORT`, `WEB_PORT`, `NEXT_PUBLIC_API_URL`, `FRONTEND_URL`, and GitHub’s callback URL together, then rebuild `web` and restart the stack. |
 

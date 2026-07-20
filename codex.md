@@ -1,6 +1,6 @@
-# How We Used Codex and GPT-5.6
+# How We Used Codex and OpenAI Models
 
-This project was built with a human-led, AI-assisted workflow. Codex and GPT-5.6 helped us move faster through exploration, implementation, debugging, and refinement, while the team retained ownership of the product decisions and final quality bar.
+This project was built with a human-led, AI-assisted workflow. Codex and OpenAI models helped us move faster through exploration, implementation, debugging, and refinement, while the team retained ownership of the product decisions and final quality bar.
 
 ## 1. System Design First
 
@@ -26,7 +26,7 @@ The team chose the features, defined expected behavior, and reviewed each result
 
 ## 3. Debugging and Quality Checks
 
-GPT-5.6 was especially useful when an issue involved more than one layer of the application.
+OpenAI models were especially useful when an issue involved more than one layer of the application.
 
 - Investigated failures using the surrounding code and system context, not only the immediate error message.
 - Helped identify edge cases and mismatches between intended behavior and implementation.
@@ -55,4 +55,4 @@ This made it possible to iterate on the design quickly while preserving intentio
 
 ## Principle
 
-We used Codex and GPT-5.6 where they provided genuine leverage: understanding a complex codebase, accelerating well-defined implementation, diagnosing problems, and improving clarity. Human judgment remained responsible for system direction, design choices, validation, and the final app delivered.
+We used Codex and OpenAI models where they provided genuine leverage: understanding a complex codebase, accelerating well-defined implementation, diagnosing problems, and improving clarity. Human judgment remained responsible for system direction, design choices, validation, and the final app delivered.
