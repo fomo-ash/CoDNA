@@ -20,9 +20,11 @@ class FakeRetrievalService:
     def __init__(self, results: list[RepositorySearchResult]) -> None:
         self.results = results
         self.limit = None
+        self.calls = []
 
     async def search(self, **kwargs) -> RepositorySearchResponse:
         self.limit = kwargs["limit"]
+        self.calls.append(kwargs)
         return RepositorySearchResponse(
             repository_id=REPOSITORY_ID,
             query=kwargs["query"],
@@ -160,6 +162,17 @@ def test_question_uses_bounded_retrieval_and_returns_citations() -> None:
     assert cached_response.answer == response.answer
     assert cached_response.cached is True
     assert len(usage_tracker.reservations) == 1
+
+
+def test_runtime_questions_prefer_source_evidence() -> None:
+    retrieval = FakeRetrievalService([result("app/middleware/auth.py", "AuthContextMiddleware")])
+    service = RepositoryQuestionService(
+        settings(), retrieval, FakeAnswerProvider(), FakeUsageTracker(), FakeAnswerCache()
+    )
+
+    asyncio.run(service.ask(object(), REPOSITORY_ID, OWNER_ID, "How does JWT authentication middleware work?"))
+
+    assert retrieval.calls[0]["source_type"] == "source_code"
 
 
 def test_question_skips_provider_when_no_evidence_exists() -> None:

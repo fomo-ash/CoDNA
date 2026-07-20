@@ -155,15 +155,30 @@ class RepositoryQuestionService:
             results = await self._impact_evidence(session, repository_id, [], traversal)
             vector_search_used = False
         else:
+            source_first = self._prefers_source_evidence(question)
             retrieval = await self.retrieval_service.search(
                 session=session,
                 repository_id=repository_id,
                 owner_id=owner_id,
                 query=question,
-                source_type=None,
+                source_type="source_code" if source_first else None,
                 chunk_type=None,
                 limit=self.settings.answer_max_context_chunks,
             )
+            # Runtime questions need implementation evidence when it exists. This
+            # preserves retrieval ranking while selecting source chunks before
+            # documentation; mixed evidence remains the fallback when no source
+            # chunks match the question.
+            if source_first and not retrieval.results:
+                retrieval = await self.retrieval_service.search(
+                    session=session,
+                    repository_id=repository_id,
+                    owner_id=owner_id,
+                    query=question,
+                    source_type=None,
+                    chunk_type=None,
+                    limit=self.settings.answer_max_context_chunks,
+                )
             vector_search_used = retrieval.vector_search_used
             if not retrieval.results:
                 return RepositoryQuestionResponse(
@@ -226,6 +241,20 @@ class RepositoryQuestionService:
         return OpenAIAnswerProvider(
             self.settings.openai_api_key, self.settings.answer_model, self.settings.answer_max_output_tokens
         )
+
+    @staticmethod
+    def _prefers_source_evidence(question: str) -> bool:
+        """Use implementation evidence first for runtime and code-behavior questions."""
+        normalized = question.lower()
+        if re.search(r"\b[\w./-]+\.(?:py|js|jsx|ts|tsx|go|java|rb|rs|php|cs)\b", normalized):
+            return True
+        runtime_terms = (
+            "implementation", "runtime", "trace", "execution", "request flow", "data flow",
+            "middleware", "handler", "route", "endpoint", "api", "authentication", "authenticate",
+            "jwt", "bearer", "token", "config", "configuration", "imports", "called by",
+            "dependency", "impact", "search", "retrieval", "embedding",
+        )
+        return any(term in normalized for term in runtime_terms)
 
     def _maximum_cost(self) -> Decimal:
         # A conservative reservation prevents a final response from exceeding the configured budget.
