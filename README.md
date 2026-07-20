@@ -131,6 +131,7 @@ Building CoDNA became much more than connecting an LLM to GitHub.
 The project documentation is intentionally close to the product, not an afterthought:
 
 - [End-to-end setup](SETUP.md)
+- [Codex & GPT 5.6 integration](codex.md)
 - [API reference](docs/API.md)
 - [Repository indexing pipeline](docs/ASYNC_INDEXING.md)
 - [Architecture](docs/ARCHITECTURE.md)
