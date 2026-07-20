@@ -129,6 +129,43 @@ def test_builder_resolves_repository_local_call_and_import_relationships(tmp_pat
     ]
 
 
+def test_builder_resolves_multilevel_typescript_relative_imports(tmp_path) -> None:
+    api_path = tmp_path / "apps/web/lib/api.ts"
+    page_path = tmp_path / "apps/web/app/repositories/[id]/search/page.tsx"
+    api_path.parent.mkdir(parents=True)
+    page_path.parent.mkdir(parents=True)
+    api_path.write_text("export function api() { return 'ok'; }\n", encoding="utf-8")
+    page_path.write_text(
+        "import { api } from '../../../../lib/api';\nexport function search() { return api(); }\n",
+        encoding="utf-8",
+    )
+    items = [
+        knowledge_item("apps/web/lib/api.ts", "source_code", "source_file", {"language": "TypeScript"}),
+        knowledge_item("apps/web/lib/api.ts", "source_code", "symbol", {
+            "name": "api", "kind": "function", "start_line": 1, "end_line": 1,
+            "stable_symbol_id": "apps/web/lib/api.ts::api", "calls": [], "references": [], "is_exported": True,
+        }, "api"),
+        knowledge_item("apps/web/app/repositories/[id]/search/page.tsx", "source_code", "source_file", {"language": "TSX"}),
+        knowledge_item("apps/web/app/repositories/[id]/search/page.tsx", "source_code", "import", {
+            "source": "../../../../lib/api", "items": ["api"],
+        }, "api"),
+        knowledge_item("apps/web/app/repositories/[id]/search/page.tsx", "source_code", "symbol", {
+            "name": "search", "kind": "function", "start_line": 2, "end_line": 2,
+            "stable_symbol_id": "apps/web/app/repositories/[id]/search/page.tsx::search", "calls": ["api"], "references": [], "is_exported": True,
+        }, "search"),
+    ]
+
+    chunks = SemanticChunkBuilder().build(tmp_path, items)
+    chunk_by_title = {chunk.title: chunk for chunk in chunks}
+
+    assert chunk_by_title["search"].metadata["relationships"]["imports"] == [
+        {"symbol": "api", "path": "apps/web/lib/api.ts", "stable_symbol_id": "apps/web/lib/api.ts::api"}
+    ]
+    assert chunk_by_title["api"].metadata["relationships"]["imported_by"] == [
+        {"path": "apps/web/app/repositories/[id]/search/page.tsx"}
+    ]
+
+
 def test_builder_creates_constant_chunks_and_resolves_references(tmp_path) -> None:
     (tmp_path / "settings.py").write_text("LIMIT = 3\n\ndef get_limit():\n    return LIMIT\n", encoding="utf-8")
     items = [

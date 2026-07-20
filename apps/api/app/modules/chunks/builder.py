@@ -4,6 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 import re
+import posixpath
 from uuid import UUID
 
 from app.db.models.repository_knowledge_item import RepositoryKnowledgeItem
@@ -526,9 +527,11 @@ class SemanticChunkBuilder:
         if not source:
             return None
         if source.startswith("."):
-            parent = Path(current_path).parent
-            relative = source.lstrip(".").replace("/", ".")
-            module = ".".join(part for part in [self._module_name(str(parent)), relative] if part)
+            # Resolve JavaScript/TypeScript relative imports from the importing file,
+            # not by stripping leading dots. For example, ../../../../lib/api from
+            # apps/web/app/repositories/[id]/search/page.tsx targets apps/web/lib/api.
+            relative_path = posixpath.normpath(posixpath.join(posixpath.dirname(current_path), source))
+            module = self._module_name(relative_path)
             return module_paths.get(module)
         return module_paths.get(source) or module_paths.get(source.replace("/", "."))
 

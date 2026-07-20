@@ -29,6 +29,8 @@ function RepositoryDetailsContent({ params }: PageProps) {
   const [repo, setRepo] = useState<Repository | null>(null);
   const [stats, setStats] = useState<RepositoryStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isReindexing, setIsReindexing] = useState(false);
+  const [reindexError, setReindexError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
 
   // --- Tab 1: Overview Languages & Stats ---
@@ -308,6 +310,22 @@ function RepositoryDetailsContent({ params }: PageProps) {
     router.push("/");
   };
 
+  const handleReindex = async () => {
+    if (!id || isReindexing) return;
+    setIsReindexing(true);
+    setReindexError(null);
+    try {
+      await api.startIndexing(id);
+      setRepo((current) => current ? { ...current, status: "indexing" } : current);
+      setStats(null);
+      setActiveTab("overview");
+    } catch (err: any) {
+      setReindexError(err?.message || "Unable to start re-indexing. Please try again.");
+    } finally {
+      setIsReindexing(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center min-h-screen bg-paper-white font-sohne">
@@ -345,6 +363,16 @@ function RepositoryDetailsContent({ params }: PageProps) {
             ← Back to Dashboard
           </Link>
           <div className="flex items-center gap-4">
+            {repo.status === "ready" && (
+              <button
+                type="button"
+                onClick={handleReindex}
+                disabled={isReindexing}
+                className="inline-flex items-center justify-center h-9 px-4 rounded-buttons border border-ink-black/15 text-ink-black hover:bg-mist-gray disabled:cursor-not-allowed disabled:opacity-60 transition-all text-[13px] font-medium whitespace-nowrap"
+              >
+                {isReindexing ? "Starting re-index…" : "Re-index repository"}
+              </button>
+            )}
             <Link
               href={`/repositories/${repo.id}/search`}
               className="inline-flex items-center justify-center h-9 px-4 rounded-buttons bg-ink-black text-white hover:bg-ink-black/90 active:scale-95 transition-all text-[13px] font-medium gap-2 cursor-pointer shadow-sm whitespace-nowrap"
@@ -371,6 +399,12 @@ function RepositoryDetailsContent({ params }: PageProps) {
             </span>
           </div>
         </div>
+
+        {reindexError && (
+          <p role="alert" className="mb-4 rounded-cards border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+            {reindexError}
+          </p>
+        )}
 
         <div className="border-b border-mist-gray pb-[24px] mb-[24px] text-left flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
