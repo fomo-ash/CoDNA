@@ -1,104 +1,66 @@
-# CodeDNA future work
+# CodeDNA: Future Roadmap
 
-This document separates the local, low-cost repository intelligence path from
-provider-backed features and records the next implementation priorities.
+CodeDNA is designed to grow from a local repository-intelligence tool into a reliable, publicly available platform for understanding and working with codebases. The next phase focuses on accessibility, accuracy, security, and deeper AI-powered workflows.
 
-## Product tiers
+## 1. Public Deployment
 
-### Free core
+We plan to make CodeDNA available through a production deployment so users can access it without local setup.
 
-The following work runs in CodeDNA's own API and worker infrastructure and
-does not require an OpenAI or Google AI request:
+- Deploy the web application, API, and background worker as managed production services.
+- Use PostgreSQL with pgvector for application data and semantic search, Redis for job coordination, and durable storage for repository workspaces.
+- Configure production GitHub OAuth, HTTPS, restricted CORS origins, monitoring, backups, and error reporting.
+- Introduce sensible repository-size, indexing, retention, and usage limits to keep the service dependable as it grows.
+- Provide a staging environment to validate releases before they reach users.
 
-- GitHub sign-in and public repository import
-- cloning and file discovery
-- parsing, knowledge extraction, and semantic chunk construction
-- file, parse-result, knowledge, chunk, and history explorers
-- lexical retrieval, including filename and path search
-- GitHub commit, pull request, and issue history ingestion
+## 2. Becoming Part of the OpenAI Ecosystem
 
-The free tier should apply repository-size, file-count, indexing-frequency,
-and retention limits so worker and storage costs stay predictable.
+We intend to deepen CodeDNA's use of OpenAI capabilities where they genuinely improve the developer experience.
 
-### Provider-backed features
+- Use OpenAI models for higher-quality repository Q&A, summaries, change explanations, and guided codebase exploration.
+- Use embeddings to improve semantic and hybrid search across files, symbols, documentation, commits, pull requests, and issues.
+- Surface grounded answers with citations to the relevant repository files and context.
+- Keep provider credentials secure on the server and make model-backed features transparent about availability and usage.
+- Explore OpenAI ecosystem integrations that make CodeDNA easier to use in real engineering workflows, while preserving a useful lexical-search path when AI features are unavailable.
 
-These features require a configured model provider and should be paid,
-trial-limited, or available through a bring-your-own-key option:
+## 3. More Accurate and Trustworthy Results
 
-- embeddings and semantic/hybrid retrieval
-- generated repository Q&A
-- any future model-based summaries or change explanations
+Accuracy is the most important requirement for a tool that explains code.
 
-Provider credentials remain server-side. The browser receives only CodeDNA's
-session JWT and never an OpenAI, Google, or GitHub OAuth secret.
+- Add evaluation fixtures for factuality, citation coverage, relevance, and rejection of unsupported answers.
+- Improve code parsing, symbol detection, dependency mapping, and chunking so retrieved context is more precise.
+- Add confidence signals and clear source links so users can verify answers quickly.
+- Strengthen retrieval with file-, path-, and symbol-aware search, along with better ranking and filtering.
+- Test answers against known repositories and regression cases before shipping model or retrieval changes.
 
-## Deployment architecture
+## 4. Private Repository Support
 
-CodeDNA needs more than a frontend host:
+Private repositories are a major next step for teams that need repository intelligence on their own work.
 
-- **Web**: Next.js application
-- **API**: FastAPI application and GitHub OAuth callback handling
-- **Worker**: Celery worker for clone, index, history, and embedding tasks
-- **PostgreSQL + pgvector**: application data, chunks, history, embeddings,
-  answer cache, and usage tracking
-- **Redis**: Celery broker and job coordination
-- **Persistent repository storage**: a durable volume for development or an
-  object-storage-backed workspace strategy for production
+- Support GitHub-authorized access to private repositories with explicit user consent.
+- Enforce repository ownership checks and strict isolation between users and organizations.
+- Keep GitHub tokens, provider keys, and session credentials server-side and out of the browser.
+- Add clear controls for repository deletion, data retention, re-indexing, and export.
+- Provide audit logs, rate limits, quotas, and per-user spending safeguards for production use.
 
-Supabase is optional. It can host PostgreSQL and pgvector, but it does not
-replace Redis, the worker runtime, or persistent repository storage. Supabase
-Auth is also optional because CodeDNA currently owns GitHub OAuth and issues
-its own session JWTs.
+## 5. A Richer Repository View
 
-Suggested first production topology:
+We will continue making CodeDNA more useful beyond a single question-and-answer interaction.
 
-- Supabase PostgreSQL with pgvector enabled
-- Redis Cloud or Upstash Redis
-- API, worker, and web deployed as separate Docker services on Railway,
-  Render, Fly.io, or equivalent
-- S3/R2-compatible object storage for durable repository workspaces
-- GitHub OAuth app configured with the production web callback URL
+- Add per-file and symbol-level history, including when code was introduced or changed.
+- Connect commits, pull requests, issues, changed files, and code chunks into a navigable engineering timeline.
+- Improve impact analysis so developers can see which files and symbols may be affected by a change.
+- Add clearer indexing status, retry controls, and graceful lexical-only behavior when semantic features are not configured.
+- Refine the frontend with stronger navigation, understandable loading and error states, and a more focused workflow for exploring large repositories.
 
-## Product roadmap
+## 6. Production Readiness
 
-### Repository history
+Before broad release, we will validate CodeDNA across the full user journey.
 
-- Add per-file history using `git log -- <path>`.
-- Add symbol-level introduction and change history where parser metadata can
-  identify the relevant source range.
-- Link history artifacts to changed paths and chunks instead of presenting a
-  repository-wide timeline only.
-- Add pagination and refresh controls; current ingestion is intentionally
-  bounded to GitHub's latest history page per artifact type.
+- Test sign-in, public and private imports, indexing, history ingestion, search, Q&A, citations, and failure recovery.
+- Run worker and API integration tests for background processing, provider failures, and access-control boundaries.
+- Add browser-level end-to-end tests for the most important user flows.
+- Monitor performance, cost, and reliability under realistic repository sizes and usage patterns.
 
-### Retrieval and Q&A
+## Goal
 
-- Add a user-visible embedding retry/status action everywhere repositories are
-  listed.
-- Add an explicit lexical-only mode when no embedding provider is configured.
-- Make Q&A explain when generation is unavailable rather than presenting a
-  generic failure.
-- Add file/symbol-aware impact paths with autocomplete.
-- Add evaluation fixtures for factuality, citation coverage, and irrelevant
-  context rejection.
-
-### Security and operations
-
-- Use HTTPS and production-only CORS origins.
-- Rotate and store provider/GitHub secrets in the deployment platform's secret
-  manager, never in committed `.env` files.
-- Add request rate limits, repository quotas, worker concurrency limits, and
-  per-user spend caps.
-- Add structured audit logs and error monitoring.
-- Add backup, retention, deletion, and user data-export policies.
-
-### Testing before production
-
-- API tests for GitHub OAuth, repository ownership isolation, public import,
-  history access, embedding retry, and provider failure fallback.
-- Worker integration tests for indexing, history ingestion, and embedding
-  status transitions.
-- Browser end-to-end tests for login, import, index, lexical search, semantic
-  search, Q&A citations, and history links.
-- A staging deployment with real GitHub OAuth and a non-production provider
-  budget cap.
+The goal is to deliver a secure, accurate, and accessible code-intelligence platform that helps developers understand unfamiliar repositories faster. CodeDNA will combine dependable engineering foundations with carefully applied OpenAI capabilities, while keeping user trust, privacy, and verifiable answers at the center of the product.
