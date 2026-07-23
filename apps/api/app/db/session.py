@@ -7,11 +7,17 @@ from app.core.config import Settings
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
-    db_url = settings.database_url
+    db_url = (settings.database_url or "").strip()
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    if not db_url.startswith("postgresql+asyncpg://"):
+        raise ValueError(
+            f"Invalid DATABASE_URL: expected 'postgresql+asyncpg://...', received '{db_url[:20]}'. "
+            "In Railway, click 'New Variable' -> 'Add Reference' and select your Postgres DATABASE_URL."
+        )
     return create_async_engine(db_url, pool_pre_ping=True)
 
 
