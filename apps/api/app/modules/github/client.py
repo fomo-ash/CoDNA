@@ -104,7 +104,7 @@ class GitHubClient:
         }[artifact_type]
         response = await self._request(
             "GET",
-            f"{self.settings.github_api_url}/repos/{quote(full_name, safe='/')}/{endpoint}",
+            f"{self.api_base_url}/repos/{quote(full_name, safe='/')}/{endpoint}",
             access_token=access_token,
             params={"state": "all", "per_page": per_page},
         )
@@ -134,6 +134,7 @@ class GitHubClient:
         request_headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "CoDNA-App/1.0",
         }
         if access_token:
             request_headers["Authorization"] = f"Bearer {access_token}"
