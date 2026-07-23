@@ -17,15 +17,15 @@ from app.middleware.auth import AuthContextMiddleware
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    app_settings = app.state.settings
+async def lifespan(fastapi_app: FastAPI):
+    app_settings = fastapi_app.state.settings
     logger = logging.getLogger("app.lifecycle")
     logger.info("application starting")
     logger.info("environment=%s", app_settings.app_env)
 
     engine = create_engine(app_settings)
-    app.state.db_engine = engine
-    app.state.session_factory = create_session_factory(engine)
+    fastapi_app.state.db_engine = engine
+    fastapi_app.state.session_factory = create_session_factory(engine)
 
     from app.db.base import Base
     import app.db.models  # noqa: F401
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables initialized successfully")
-    app.state.redis = Redis.from_url(
+    fastapi_app.state.redis = Redis.from_url(
         app_settings.redis_url,
         encoding="utf-8",
         decode_responses=True,
@@ -41,14 +41,14 @@ async def lifespan(app: FastAPI):
     logger.info("Redis initialized")
 
     if getattr(app_settings, "otel_enabled", True):
-        setup_telemetry(app=app, db_engine=app.state.db_engine)
+        setup_telemetry(app=fastapi_app, db_engine=fastapi_app.state.db_engine)
 
     try:
         logger.info("application ready")
         yield
     finally:
-        await app.state.redis.aclose()
-        await app.state.db_engine.dispose()
+        await fastapi_app.state.redis.aclose()
+        await fastapi_app.state.db_engine.dispose()
 
 
 def create_app() -> FastAPI:
