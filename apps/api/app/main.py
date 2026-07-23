@@ -1,3 +1,4 @@
+# Trigger Celery worker startup deployment
 from __future__ import annotations
 
 import logging
