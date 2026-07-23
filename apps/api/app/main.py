@@ -51,13 +51,12 @@ def create_app() -> FastAPI:
         version=app_settings.app_version,
         lifespan=lifespan,
     )
-    allowed_origins = [app_settings.frontend_url or "http://localhost:3333"]
-    # Local development commonly serves the web app from port 3333.
-    if "http://localhost:3333" not in allowed_origins:
-        allowed_origins.append("http://localhost:3333")
+    allowed_origins = [app_settings.frontend_url, "http://localhost:3333", "http://localhost:3000"]
+    allowed_origins = [o.rstrip('/') for o in allowed_origins if o]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
+        allow_origin_regex=r"https://.*\.vercel\.app",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
