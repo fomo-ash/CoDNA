@@ -28,7 +28,8 @@ async def lifespan(fastapi_app: FastAPI):
     fastapi_app.state.session_factory = create_session_factory(engine)
 
     from app.db.base import Base
-    import app.db.models  # noqa: F401
+    import importlib
+    importlib.import_module("app.db.models")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
