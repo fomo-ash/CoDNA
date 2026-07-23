@@ -1,4 +1,4 @@
-# Limit Celery concurrency to 2 workers to prevent Railway OOM
+# Production entrypoint for FastAPI and Celery background workers
 from __future__ import annotations
 
 import logging
