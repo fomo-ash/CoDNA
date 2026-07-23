@@ -1,4 +1,4 @@
-# Bind Uvicorn to port 8000 to match Railway public domain target port
+# CoDNA FastAPI Application Entrypoint
 from __future__ import annotations
 
 import logging

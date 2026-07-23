@@ -2,6 +2,8 @@
 
 > **Understand a codebase before you change it.**
 
+👉 **Live Demo:** [https://co-dna-web.vercel.app](https://co-dna-web.vercel.app)
+
 CoDNA is an AI-powered repository intelligence workspace for the moment every developer knows: you open an unfamiliar project, want to contribute something useful, and realize the real task is first understanding how the system thinks.
 
 ## Inspiration
