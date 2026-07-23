@@ -24,6 +24,13 @@ async def lifespan(app: FastAPI):
 
     app.state.db_engine = create_engine(app_settings)
     app.state.session_factory = create_session_factory(app.state.db_engine)
+
+    from app.db.base import Base
+    import app.db.models  # noqa: F401
+    async with app.state.db_engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables initialized successfully")
     app.state.redis = Redis.from_url(
         app_settings.redis_url,
         encoding="utf-8",
