@@ -1,4 +1,4 @@
-# Trigger Celery worker startup deployment
+# Limit Celery concurrency to 2 workers to prevent Railway OOM
 from __future__ import annotations
 
 import logging
