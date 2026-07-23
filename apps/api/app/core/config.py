@@ -10,10 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str
-    app_version: str
-    app_env: str
-    log_level: str
+    app_name: str = "CodeDNA API"
+    app_version: str = "0.1.0"
+    app_env: str = "production"
+    log_level: str = "INFO"
     database_url: str
     redis_url: str
     repository_workspace_path: str = "/tmp/codna/repositories"
