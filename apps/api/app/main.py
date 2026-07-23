@@ -1,4 +1,4 @@
-# Production entrypoint for FastAPI and Celery background workers
+# Bind Uvicorn to port 8000 to match Railway public domain target port
 from __future__ import annotations
 
 import logging
