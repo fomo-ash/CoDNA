@@ -20,10 +20,12 @@ import {
   RepositorySearchResponse
 } from "../types/api";
 
-const API_BASE_URL = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001") : "http://localhost:8001";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
-// Use the real API and GitHub OAuth flow in local development and deployment.
-const USE_MOCK = false;
+// Demo mode is a separate, read-only frontend build for judges. It is disabled
+// by default, so normal Docker setup always uses the live API and OAuth flow.
+export const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+const USE_MOCK = isDemoMode;
 
 // --- Mock State Store (in localStorage) ---
 const MOCK_STORAGE_KEY = "codna_mock_db";
@@ -173,8 +175,8 @@ async function request<T>(
 const mockApi = {
   getGithubLoginUrl: async (): Promise<{ authorization_url: string }> => {
     const mockAuthUrl = typeof window !== "undefined"
-      ? `${window.location.origin}/?mock_callback=true`
-      : "http://localhost:3000/?mock_callback=true";
+      ? `${window.location.origin}/auth/callback?code=demo&state=demo`
+      : "http://localhost:3000/auth/callback?code=demo&state=demo";
     return { authorization_url: mockAuthUrl };
   },
 
@@ -880,6 +882,35 @@ const mockApi = {
       query,
       results: results.slice(0, limit),
       vector_search_used: true
+    };
+  },
+
+  askRepositoryQuestion: async (
+    id: string,
+    payload: { question: string; impact_path?: string; impact_depth?: number }
+  ): Promise<import("../types/api").RepositoryQuestionResponse> => {
+    const chunks = (await mockApi.getRepositoryChunks(id)).chunks;
+    const cited = chunks.slice(0, 3);
+    const normalizedQuestion = payload.question.toLowerCase();
+    const isImpactQuestion = Boolean(payload.impact_path) || normalizedQuestion.includes("impact") || normalizedQuestion.includes("depend");
+    const answer = isImpactQuestion
+      ? `## Evidence-backed impact\n\nThis read-only demo uses a pre-indexed repository snapshot. The selected impact path is evaluated through stored repository-local relationships, so direct import and call evidence is separated from deeper traversal.\n\n## Evidence boundary\n\nStatic relationships are useful for review planning, but dynamic imports, framework registration, and external services are not presented as proven dependencies.`
+      : `## Overview\n\nThis read-only demo answer is generated from a pre-indexed evidence snapshot. CoDNA retrieves focused chunks instead of sending an entire repository to a model.\n\n## Execution and evidence\n\nSource chunks preserve paths, line ranges, symbols, and local relationships. The answer view links each claim back to the exact chunk so a developer can inspect the underlying implementation.\n\n## Evidence boundary\n\nThis demo does not perform live GitHub import, indexing, or provider-backed generation. Those capabilities are available through the normal Docker setup.`;
+
+    return {
+      repository_id: id,
+      question: payload.question,
+      answer,
+      citations: cited.map((chunk, index) => ({
+        index: index + 1,
+        chunk_id: chunk.id,
+        path: chunk.path,
+        start_line: chunk.start_line,
+        end_line: chunk.end_line,
+        title: chunk.title,
+      })),
+      vector_search_used: true,
+      cached: true,
     };
   },
 };
