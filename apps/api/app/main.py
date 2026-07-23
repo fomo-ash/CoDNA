@@ -22,12 +22,13 @@ async def lifespan(app: FastAPI):
     logger.info("application starting")
     logger.info("environment=%s", app_settings.app_env)
 
-    app.state.db_engine = create_engine(app_settings)
-    app.state.session_factory = create_session_factory(app.state.db_engine)
+    engine = create_engine(app_settings)
+    app.state.db_engine = engine
+    app.state.session_factory = create_session_factory(engine)
 
     from app.db.base import Base
     import app.db.models  # noqa: F401
-    async with app.state.db_engine.begin() as conn:
+    async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables initialized successfully")
