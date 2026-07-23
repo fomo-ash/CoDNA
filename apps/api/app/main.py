@@ -10,6 +10,7 @@ from redis.asyncio import Redis
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.core.telemetry import setup_telemetry
 from app.db.session import create_engine, create_session_factory
 from app.middleware.auth import AuthContextMiddleware
 
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI):
         decode_responses=True,
     )
     logger.info("Redis initialized")
+
+    if getattr(app_settings, "otel_enabled", True):
+        setup_telemetry(app=app, db_engine=app.state.db_engine)
 
     try:
         logger.info("application ready")

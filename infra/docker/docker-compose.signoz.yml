@@ -1,0 +1,49 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1.2-alpine
+    container_name: codna-clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  signoz-otel-collector:
+    image: signoz/signoz-otel-collector:0.111.16
+    container_name: codna-signoz-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  signoz-query-service:
+    image: signoz/query-service:latest
+    container_name: codna-signoz-query-service
+    environment:
+      - ClickHouseUrl=tcp://clickhouse:9000
+      - STORAGE=clickhouse
+      - TELEMETRY_ENABLED=true
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  signoz-frontend:
+    image: signoz/frontend:latest
+    container_name: codna-signoz-frontend
+    ports:
+      - "3301:3301"
+    environment:
+      - FRONTEND_PORT=3301
+    depends_on:
+      - signoz-query-service
+
+volumes:
+  clickhouse_data:

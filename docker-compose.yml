@@ -56,6 +56,10 @@ services:
       ANSWER_MAX_OUTPUT_TOKENS: 1600
       ANSWER_BUDGET_USD: ${ANSWER_BUDGET_USD:-4.00}
       LOG_LEVEL: INFO
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-codna-api}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://host.docker.internal:4318}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -122,6 +126,10 @@ services:
       EMBEDDING_DIMENSIONS: 1536
       EMBEDDING_BATCH_SIZE: 64
       LOG_LEVEL: INFO
+      OTEL_SERVICE_NAME: ${OTEL_WORKER_SERVICE_NAME:-codna-worker}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://host.docker.internal:4318}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - repository_data:/var/lib/codna/repositories
     depends_on:
@@ -137,9 +145,15 @@ services:
       args:
         # NEXT_PUBLIC_* values are embedded in the browser bundle at build time.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
     container_name: codna-web
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+      NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
+      OTEL_SERVICE_NAME: ${OTEL_WEB_SERVICE_NAME:-codna-web}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://host.docker.internal:4318}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:

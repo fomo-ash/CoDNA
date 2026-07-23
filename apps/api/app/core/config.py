@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int | None = None
     oauth_state_expire_minutes: int | None = None
 
+    otel_enabled: bool = True
+    otel_service_name: str = "codna-api"
+    otel_exporter_otlp_endpoint: str = "http://signoz-otel-collector:4318"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
