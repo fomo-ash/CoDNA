@@ -264,7 +264,11 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
               <button type="submit" disabled={isAsking} className="px-5 py-2 rounded-buttons bg-ink-black text-paper-white text-[14px] disabled:opacity-70">{isAsking ? "Answering..." : "Ask"}</button>
             </div>
           </form>
-          {answerError && <p className="mt-4 text-sm text-red-600">{answerError}</p>}
+          {answerError && (
+            <div className="mt-4 rounded-inputs border border-amber-300/80 bg-amber-50/90 p-4 text-[13px] leading-relaxed text-amber-950 shadow-subtle">
+              <p className="font-w500 text-amber-900">{answerError}</p>
+            </div>
+          )}
           {answer && (
             <div className="mt-6 border-t border-mist-gray pt-5">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-w500 uppercase tracking-wider">

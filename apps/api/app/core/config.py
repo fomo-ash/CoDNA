@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     otel_enabled: bool = True
     otel_service_name: str = "codna-api"
     otel_exporter_otlp_endpoint: str = "http://signoz-otel-collector:4318"
+    question_rate_limit_per_repo: int = 1
 
     model_config = SettingsConfigDict(
         env_file=".env",
