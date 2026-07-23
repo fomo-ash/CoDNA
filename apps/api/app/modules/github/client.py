@@ -19,10 +19,26 @@ class GitHubClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    @property
+    def api_base_url(self) -> str:
+        return self.settings.github_api_url or "https://api.github.com"
+
+    @property
+    def token_url(self) -> str:
+        return self.settings.github_token_url or "https://github.com/login/oauth/access_token"
+
+    @property
+    def user_url(self) -> str:
+        return self.settings.github_user_url or "https://api.github.com/user"
+
+    @property
+    def repositories_url(self) -> str:
+        return self.settings.github_repositories_url or "https://api.github.com/user/repos"
+
     async def exchange_code(self, code: str) -> dict[str, Any]:
         response = await self._request(
             "POST",
-            self.settings.github_token_url,
+            self.token_url,
             headers={"Accept": "application/json"},
             data={
                 "client_id": self.settings.github_client_id,
@@ -34,7 +50,7 @@ class GitHubClient:
         return self._json(response)
 
     async def get_me(self, access_token: str) -> dict[str, Any]:
-        response = await self._request("GET", self.settings.github_user_url, access_token=access_token)
+        response = await self._request("GET", self.user_url, access_token=access_token)
         return self._json(response)
 
     async def list_repositories(
@@ -48,7 +64,7 @@ class GitHubClient:
     ) -> tuple[list[dict[str, Any]], bool]:
         response = await self._request(
             "GET",
-            self.settings.github_repositories_url,
+            self.repositories_url,
             access_token=access_token,
             params={
                 "visibility": visibility,
@@ -67,9 +83,9 @@ class GitHubClient:
         full_name: str | None = None,
     ) -> dict[str, Any]:
         if github_id is not None:
-            url = f"{self.settings.github_api_url}/repositories/{quote(github_id, safe='')}"
+            url = f"{self.api_base_url}/repositories/{quote(github_id, safe='')}"
         else:
-            url = f"{self.settings.github_api_url}/repos/{quote(full_name or '', safe='/')}"
+            url = f"{self.api_base_url}/repos/{quote(full_name or '', safe='/')}"
         response = await self._request("GET", url, access_token=access_token)
         return self._json(response)
 
