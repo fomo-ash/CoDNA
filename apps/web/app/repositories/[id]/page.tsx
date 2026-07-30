@@ -369,13 +369,13 @@ function RepositoryDetailsContent({ params }: PageProps) {
                 onClick={handleReindex}
                 disabled={isReindexing}
                 title="Run the latest repository indexing job"
-                className="group inline-flex h-9 items-center justify-center gap-2 rounded-full border border-ink-black/10 bg-paper-white px-3.5 text-[13px] font-medium text-slate-gray shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:border-ink-black/20 hover:bg-ink-black hover:text-paper-white hover:shadow-[0_4px_12px_rgba(15,23,42,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-black/30 disabled:cursor-not-allowed disabled:opacity-60"
+                className="group inline-flex items-center gap-1.5 text-[12px] text-ash-gray hover:text-slate-gray transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
               >
                 {isReindexing ? (
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+                  <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" aria-hidden="true" />
                 ) : (
                   <svg
-                    className="h-3.5 w-3.5 transition-transform duration-300 group-hover:-rotate-45"
+                    className="h-3 w-3 transition-transform duration-300 group-hover:-rotate-45"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -385,30 +385,9 @@ function RepositoryDetailsContent({ params }: PageProps) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M20 11a8 8 0 0 0-15.5-2.5M4 5v3.5h3.5M4 13a8 8 0 0 0 15.5 2.5M20 19v-3.5h-3.5" />
                   </svg>
                 )}
-                <span>{isReindexing ? "Starting…" : "Re-index"}</span>
+                <span>{isReindexing ? "Re-indexing…" : "Re-index"}</span>
               </button>
             )}
-            <Link
-              href={`/repositories/${repo.id}/search`}
-              className="inline-flex items-center justify-center h-9 px-4 rounded-buttons bg-ink-black text-white hover:bg-ink-black/90 active:scale-95 transition-all text-[13px] font-medium gap-2 cursor-pointer shadow-sm whitespace-nowrap"
-            >
-              <button className="flex items-center gap-2 bg-[#1F232B] text-white rounded-full px-4 py-2">
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-                <span>Retrieval Search</span>
-              </button>
-            </Link>
             <span className="text-[12px] font-mono text-ash-gray">
               ID: {repo.id}
             </span>
@@ -449,6 +428,54 @@ function RepositoryDetailsContent({ params }: PageProps) {
             </div>
           )}
         </div>
+
+        {/* ── Ask CoDNA — Primary CTA Hero ── */}
+        {repo.status === "ready" && (
+          <Link
+            href={`/repositories/${repo.id}/search`}
+            className="group block mb-[28px] cursor-pointer"
+          >
+            <div className="relative overflow-hidden rounded-cards bg-ink-black p-[40px] md:p-[48px] transition-all duration-300 hover:shadow-[0_20px_60px_rgba(23,25,28,0.35)] hover:scale-[1.003]">
+              {/* Decorative ambient glows */}
+              <div className="absolute top-0 right-0 w-[320px] h-[320px] bg-gradient-to-bl from-white/[0.06] via-white/[0.02] to-transparent rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-24 -left-24 w-[280px] h-[280px] bg-gradient-to-tr from-sienna-brown/[0.08] via-sienna-brown/[0.03] to-transparent rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[200px] bg-gradient-to-r from-transparent via-white/[0.02] to-transparent rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative flex flex-col items-center text-center gap-6">
+                {/* Sparkle Icon with glow ring */}
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-full bg-white/[0.08] blur-xl scale-[1.8] group-hover:scale-[2.2] transition-transform duration-500 pointer-events-none" />
+                  <div className="relative w-16 h-16 rounded-2xl bg-white/[0.1] border border-white/[0.1] flex items-center justify-center backdrop-blur-sm group-hover:bg-white/[0.14] transition-all duration-300">
+                    <svg className="w-8 h-8 text-paper-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* Text */}
+                <div className="max-w-md">
+                  <h2 className="text-[26px] md:text-[32px] font-signifier font-w400 text-paper-white tracking-[-0.4px] leading-tight">
+                    Ask CoDNA
+                  </h2>
+                  <p className="text-[14px] md:text-[15px] text-white/50 mt-[8px] leading-relaxed">
+                    Ask anything about your codebase — find patterns, understand architecture, explore dependencies.
+                  </p>
+                </div>
+
+                {/* CTA Button */}
+                <span className="inline-flex items-center justify-center h-[48px] px-10 rounded-buttons bg-paper-white text-ink-black text-[15px] font-w500 gap-2.5 shadow-[0_4px_20px_rgba(255,255,255,0.15)] group-hover:shadow-[0_8px_32px_rgba(255,255,255,0.25)] group-active:scale-[0.97] transition-all duration-200 whitespace-nowrap mt-1">
+                  <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  Start Exploring
+                  <svg className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </span>
+              </div>
+            </div>
+          </Link>
+        )}
 
         {repo.status !== "ready" ? (
           <div className="border border-dashed border-ink-black/[0.08] rounded-cards p-[64px] text-center max-w-2xl mx-auto my-[48px] bg-fog-white">

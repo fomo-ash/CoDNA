@@ -172,13 +172,13 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
         {/* Title */}
         <div className="mb-[32px] text-left">
           <span className="text-[12px] font-sohne font-w500 text-ash-gray uppercase tracking-wider block mb-[6px]">
-            Hybrid Retrieval Search
+            Ask CoDNA
           </span>
           <h1 className="text-[32px] md:text-[40px] font-signifier font-w400 leading-tight text-ink-black tracking-[-0.66px]">
             Explore <span className="italic">{repo.name}</span>
           </h1>
           <p className="text-[15px] text-slate-gray mt-[4px]">
-            Execute lexical queries and pgvector semantic searches across index segments.
+            Ask anything about your codebase — find patterns, understand architecture, explore dependencies.
           </p>
         </div>
 
