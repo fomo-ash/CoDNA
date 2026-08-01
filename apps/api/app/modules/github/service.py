@@ -100,6 +100,9 @@ class GitHubServiceImpl:
                 private=False,
             )
 
+        if user.is_demo:
+            raise GitHubAuthorizationRequiredError("Demo users can only import the pre-configured demo repository.")
+
         access_token = self._get_access_token(user, allow_empty=True)
         try:
             payload = await self.client.get_repository(
