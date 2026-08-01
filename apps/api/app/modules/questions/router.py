@@ -24,9 +24,16 @@ from app.modules.repositories.service import RepositoryNotFoundError
 router = APIRouter(prefix="/repositories", tags=["repository-questions"])
 
 
-async def check_and_increment_rate_limit(request: Request, repository_id: UUID, user_id: UUID) -> None:
+async def check_and_increment_rate_limit(request: Request, repository_id: UUID, current_user: User) -> None:
     settings = get_settings()
-    if not settings.question_rate_limit_per_repo or settings.question_rate_limit_per_repo <= 0:
+    
+    # If it's a demo user, hardcode rate limit to 2
+    if current_user.is_demo:
+        rate_limit = 2
+    else:
+        rate_limit = settings.question_rate_limit_per_repo
+
+    if not rate_limit or rate_limit <= 0:
         return
 
     redis_client = getattr(request.app.state, "redis", None)
@@ -34,17 +41,21 @@ async def check_and_increment_rate_limit(request: Request, repository_id: UUID, 
         return
 
     client_ip = request.client.host if request.client else "unknown"
-    key = f"rate_limit:question:{repository_id}:{user_id}:{client_ip}"
+    key = f"rate_limit:question:{repository_id}:{current_user.id}:{client_ip}"
 
     count_str = await redis_client.get(key)
-    if count_str and int(count_str) >= settings.question_rate_limit_per_repo:
+    if count_str and int(count_str) >= rate_limit:
+        msg = (
+            "Demo question limit reached (2 questions per repository). "
+            "For the full experience, please set up your own CoDNA instance or contact ashutoshbadapanda02@gmail.com."
+        ) if current_user.is_demo else (
+            f"Question limit reached ({rate_limit} questions per repository). "
+            "For the full experience of asking unlimited questions, please check out SETUP.md and add your API key, "
+            "or contact me via email (ashutoshbadapanda02@gmail.com)."
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                "Demo question limit reached (1 question per repository). "
-                "For the full experience of asking unlimited questions, please check out SETUP.md and add your API key, "
-                "or contact me via email (ashutoshbadapanda02@gmail.com)."
-            ),
+            detail=msg,
         )
     await redis_client.incr(key)
     await redis_client.expire(key, 86400)
@@ -59,7 +70,7 @@ async def explain_repository_impact(
     service: RepositoryQuestionService = Depends(get_repository_question_service),
     current_user: User = Depends(get_current_user_record),
 ) -> RepositoryQuestionResponse:
-    await check_and_increment_rate_limit(request, repository_id, current_user.id)
+    await check_and_increment_rate_limit(request, repository_id, current_user)
     question = payload.question or (
         f"Analyze the change impact of {payload.path} using the authoritative traversal."
     )
@@ -88,7 +99,7 @@ async def ask_repository_question(
     service: RepositoryQuestionService = Depends(get_repository_question_service),
     current_user: User = Depends(get_current_user_record),
 ) -> RepositoryQuestionResponse:
-    await check_and_increment_rate_limit(request, repository_id, current_user.id)
+    await check_and_increment_rate_limit(request, repository_id, current_user)
     try:
         return await service.ask(
             session, repository_id, current_user.id, payload.question, payload.impact_path, payload.impact_depth

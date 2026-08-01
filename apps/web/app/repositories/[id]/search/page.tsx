@@ -183,72 +183,6 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
         </div>
 
         {/* Search & Filters form */}
-        <form onSubmit={handleSearchSubmit} className="space-y-4 mb-8 bg-fog-white border border-ink-black/[0.05] p-5 rounded-cards text-left">
-          <div className="flex gap-3">
-            <input
-              type="text"
-              required
-              placeholder="Search concepts, symbols, or file names (for example, app.py)..."
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.target.value)}
-              className="flex-1 bg-paper-white border border-ink-black/[0.1] rounded-inputs px-4 py-2.5 text-[14px] font-sohne text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black transition-all shadow-sm"
-            />
-            <button
-              type="submit"
-              disabled={isSearching}
-              className="h-[40px] px-6 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 transition-all text-[14px] font-w500 flex items-center justify-center cursor-pointer shadow-sm disabled:opacity-75"
-            >
-              {isSearching ? "Searching..." : "Search"}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            <div>
-              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Source Type</label>
-              <select
-                value={sourceType}
-                onChange={(e) => setSourceType(e.target.value)}
-                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
-              >
-                <option value="">All Sources</option>
-                <option value="source_code">Source Code</option>
-                <option value="documentation">Documentation</option>
-                <option value="database_schema">Database Schema</option>
-                <option value="configuration">Configuration</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Chunk Type</label>
-              <select
-                value={chunkType}
-                onChange={(e) => setChunkType(e.target.value)}
-                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
-              >
-                <option value="">All Types</option>
-                <option value="class">Class</option>
-                <option value="function">Function</option>
-                <option value="documentation_section">Doc Section</option>
-                <option value="configuration">Config</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Result Limit</label>
-              <select
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
-              >
-                <option value="10">10 results</option>
-                <option value="20">20 results</option>
-                <option value="50">50 results</option>
-                <option value="100">100 results</option>
-              </select>
-            </div>
-          </div>
-        </form>
-
         <section className="mb-8 bg-fog-white border border-ink-black/[0.05] p-5 rounded-cards text-left">
           <div className="mb-4">
             <span className="text-[12px] font-w500 text-ash-gray uppercase tracking-wider">Repository Q&A</span>
@@ -317,6 +251,72 @@ function SearchContent({ repositoryId }: { repositoryId: string }) {
             </div>
           )}
         </section>
+
+        <form onSubmit={handleSearchSubmit} className="space-y-4 mb-8 bg-fog-white border border-ink-black/[0.05] p-5 rounded-cards text-left">
+          <div className="flex gap-3">
+            <input
+              type="text"
+              required
+              placeholder="Search concepts, symbols, or file names (for example, app.py)..."
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              className="flex-1 bg-paper-white border border-ink-black/[0.1] rounded-inputs px-4 py-2.5 text-[14px] font-sohne text-ink-black placeholder-smoke-gray focus:outline-none focus:ring-1 focus:ring-ink-black transition-all shadow-sm"
+            />
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="h-[40px] px-6 rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 transition-all text-[14px] font-w500 flex items-center justify-center cursor-pointer shadow-sm disabled:opacity-75"
+            >
+              {isSearching ? "Searching..." : "Search"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            <div>
+              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Source Type</label>
+              <select
+                value={sourceType}
+                onChange={(e) => setSourceType(e.target.value)}
+                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
+              >
+                <option value="">All Sources</option>
+                <option value="source_code">Source Code</option>
+                <option value="documentation">Documentation</option>
+                <option value="database_schema">Database Schema</option>
+                <option value="configuration">Configuration</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Chunk Type</label>
+              <select
+                value={chunkType}
+                onChange={(e) => setChunkType(e.target.value)}
+                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
+              >
+                <option value="">All Types</option>
+                <option value="class">Class</option>
+                <option value="function">Function</option>
+                <option value="documentation_section">Doc Section</option>
+                <option value="configuration">Config</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-w500 text-ash-gray uppercase tracking-wider block mb-1.5">Result Limit</label>
+              <select
+                value={limit}
+                onChange={(e) => setLimit(Number(e.target.value))}
+                className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-3 py-2 text-[13px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black cursor-pointer"
+              >
+                <option value="10">10 results</option>
+                <option value="20">20 results</option>
+                <option value="50">50 results</option>
+                <option value="100">100 results</option>
+              </select>
+            </div>
+          </div>
+        </form>
 
         {/* Results layout */}
         <div className="space-y-4 text-left">

@@ -33,4 +33,5 @@ class CurrentUser(BaseModel):
     avatar_url: str | None
     created_at: datetime
     updated_at: datetime
+    is_demo: bool = False
 

@@ -89,7 +89,7 @@ class GitHubServiceImpl:
         github_id: str | None = None,
         full_name: str | None = None,
     ) -> GitHubRepository:
-        access_token = self._get_access_token(user)
+        access_token = self._get_access_token(user, allow_empty=True)
         try:
             payload = await self.client.get_repository(
                 access_token,
@@ -103,8 +103,10 @@ class GitHubServiceImpl:
         return self._to_repository(payload)
 
     @staticmethod
-    def _get_access_token(user: User) -> str:
+    def _get_access_token(user: User, allow_empty: bool = False) -> str | None:
         if not user.github_access_token:
+            if allow_empty:
+                return None
             raise GitHubAuthorizationRequiredError
         return user.github_access_token
 

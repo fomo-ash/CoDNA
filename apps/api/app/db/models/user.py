@@ -15,3 +15,7 @@ class User(TimestampedUUIDModel):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     github_access_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    @property
+    def is_demo(self) -> bool:
+        return self.username == "demo_user"

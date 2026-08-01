@@ -20,7 +20,7 @@ import {
   RepositorySearchResponse
 } from "../types/api";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API_BASE_URL = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001") : "http://localhost:8001";
 
 // Demo mode is a separate, read-only frontend build for judges. It is disabled
 // by default, so normal Docker setup always uses the live API and OAuth flow.
@@ -38,26 +38,14 @@ interface MockDB {
 const DEFAULT_MOCK_DB: MockDB = {
   importedRepos: [
     {
-      id: "codna-core",
-      github_id: "10001",
-      name: "CoDNA",
-      full_name: "fomo-ash/CoDNA",
+      id: "tiktoken",
+      github_id: "20001",
+      name: "tiktoken",
+      full_name: "openai/tiktoken",
       default_branch: "main",
-      clone_url: "https://github.com/fomo-ash/CoDNA.git",
-      visibility: "private",
-      status: "ready",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: "react-ui",
-      github_id: "10002",
-      name: "react",
-      full_name: "facebook/react",
-      default_branch: "main",
-      clone_url: "https://github.com/facebook/react.git",
+      clone_url: "https://github.com/openai/tiktoken.git",
       visibility: "public",
-      status: "registered",
+      status: "ready",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
@@ -86,37 +74,18 @@ function saveMockDB(db: MockDB) {
 
 // Pre-defined GitHub repositories to discover
 const MOCK_GITHUB_REPOS = [
-  { github_id: "10001", name: "CoDNA", full_name: "fomo-ash/CoDNA", default_branch: "main", clone_url: "https://github.com/fomo-ash/CoDNA.git", visibility: "private", private: true },
-  { github_id: "10002", name: "react", full_name: "facebook/react", default_branch: "main", clone_url: "https://github.com/facebook/react.git", visibility: "public", private: false },
-  { github_id: "10003", name: "next.js", full_name: "vercel/next.js", default_branch: "canary", clone_url: "https://github.com/vercel/next.js.git", visibility: "public", private: false },
-  { github_id: "10004", name: "tailwindcss", full_name: "tailwindlabs/tailwindcss", default_branch: "main", clone_url: "https://github.com/tailwindlabs/tailwindcss.git", visibility: "public", private: false },
-  { github_id: "10005", name: "private-secrets", full_name: "fomo-ash/private-secrets", default_branch: "main", clone_url: "https://github.com/fomo-ash/private-secrets.git", visibility: "private", private: true },
-  { github_id: "10006", name: "rust-analyzer", full_name: "rust-lang/rust-analyzer", default_branch: "master", clone_url: "https://github.com/rust-lang/rust-analyzer.git", visibility: "public", private: false },
+  { github_id: "20001", name: "tiktoken", full_name: "openai/tiktoken", default_branch: "main", clone_url: "https://github.com/openai/tiktoken.git", visibility: "public", private: false },
 ];
 
 // Pre-defined file structures for repos
 const MOCK_FILES_BY_REPO: Record<string, { path: string; lang: string; size: number }[]> = {
-  "codna-core": [
-    { path: "apps/api/app/main.py", lang: "Python", size: 1820 },
-    { path: "apps/api/app/core/config.py", lang: "Python", size: 1293 },
-    { path: "apps/api/app/modules/auth/service.py", lang: "Python", size: 5229 },
-    { path: "apps/api/app/modules/auth/router.py", lang: "Python", size: 1651 },
-    { path: "apps/api/app/modules/repositories/router.py", lang: "Python", size: 3120 },
-    { path: "apps/web/app/page.tsx", lang: "TypeScript", size: 8432 },
-    { path: "apps/web/app/dashboard/page.tsx", lang: "TypeScript", size: 12450 },
-    { path: "apps/web/app/globals.css", lang: "CSS", size: 2314 },
-    { path: "apps/web/lib/api.ts", lang: "TypeScript", size: 5892 },
-    { path: "package.json", lang: "JSON", size: 599 },
+  "tiktoken": [
+    { path: "tiktoken/core.py", lang: "Python", size: 12450 },
+    { path: "tiktoken/registry.py", lang: "Python", size: 3200 },
+    { path: "tiktoken/model.py", lang: "Python", size: 2100 },
+    { path: "src/lib.rs", lang: "Rust", size: 18230 },
+    { path: "src/core.rs", lang: "Rust", size: 4200 },
     { path: "README.md", lang: "Markdown", size: 1953 },
-    { path: "docs/API.md", lang: "Markdown", size: 6427 },
-    { path: "docs/FRONTEND_TEAMMATE_WORKPLAN.md", lang: "Markdown", size: 10654 },
-  ],
-  "react-ui": [
-    { path: "packages/react/src/React.js", lang: "JavaScript", size: 4500 },
-    { path: "packages/react-dom/src/client/ReactDOM.js", lang: "JavaScript", size: 8200 },
-    { path: "packages/shared/ReactTypes.js", lang: "JavaScript", size: 3200 },
-    { path: "package.json", lang: "JSON", size: 1200 },
-    { path: "README.md", lang: "Markdown", size: 5800 },
   ],
   "default": [
     { path: "src/index.ts", lang: "TypeScript", size: 2400 },
@@ -432,6 +401,25 @@ const mockApi = {
         avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+      }
+    };
+  },
+
+  demoLogin: async (): Promise<AuthTokenResponse> => {
+    return {
+      access_token: "mock_codedna_jwt_token_123456",
+      token_type: "bearer",
+      expires_in: 86400,
+      user: {
+        id: "demo",
+        github_id: "demo_user_id",
+        username: "demo_user",
+        email: "demo@codna.io",
+        name: "Demo User",
+        avatar_url: "https://github.com/ghost.png",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        is_demo: true,
       }
     };
   },
@@ -919,6 +907,10 @@ const mockApi = {
 export const api = USE_MOCK ? mockApi : {
   getGithubLoginUrl: async (): Promise<{ authorization_url: string }> => {
     return request<{ authorization_url: string }>("/auth/github/login");
+  },
+
+  demoLogin: async (): Promise<AuthTokenResponse> => {
+    return request<AuthTokenResponse>("/auth/demo/login");
   },
 
   getCurrentUser: async (): Promise<User> => {

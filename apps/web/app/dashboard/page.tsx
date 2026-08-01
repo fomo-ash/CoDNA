@@ -176,6 +176,7 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem("codedna_jwt");
+    localStorage.removeItem("codna_demo_mode");
     setUser(null);
     router.push("/");
   };
@@ -316,16 +317,18 @@ export default function Dashboard() {
           >
             My Codebases ({importedRepos.length})
           </button>
-          <button
-            onClick={() => setActiveTab("import-github")}
-            className={`h-[36px] px-[16px] rounded-buttons text-[15px] font-sohne transition-all ${
-              activeTab === "import-github"
-                ? "bg-ink-black text-paper-white font-w500"
-                : "bg-transparent text-slate-gray hover:text-ink-black font-w400"
-            }`}
-          >
-            Import from GitHub
-          </button>
+          {!user?.is_demo && (
+            <button
+              onClick={() => setActiveTab("import-github")}
+              className={`h-[36px] px-[16px] rounded-buttons text-[15px] font-sohne transition-all ${
+                activeTab === "import-github"
+                  ? "bg-ink-black text-paper-white font-w500"
+                  : "bg-transparent text-slate-gray hover:text-ink-black font-w400"
+              }`}
+            >
+              Import from GitHub
+            </button>
+          )}
         </div>
 
         {activeTab === "my-repos" && (
@@ -341,12 +344,29 @@ export default function Dashboard() {
                 <p className="text-[15px] text-slate-gray max-w-md mx-auto mb-[24px]">
                   Before you can audit structures or search code, you need to import repository scopes from your authorized GitHub profile.
                 </p>
-                <button
-                  onClick={() => setActiveTab("import-github")}
-                  className="h-[40px] px-[20px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 transition-all text-[15px] font-w500 inline-flex items-center justify-center cursor-pointer"
-                >
-                  Import Repository
-                </button>
+                {user?.is_demo ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.importRepository({ full_name: "openai/tiktoken" });
+                        alert("Imported openai/tiktoken successfully! It will now be cloned and indexed.");
+                        fetchImportedRepositories();
+                      } catch (err: any) {
+                        alert(err.message || "Failed to import openai/tiktoken");
+                      }
+                    }}
+                    className="h-[40px] px-[20px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 transition-all text-[15px] font-w500 inline-flex items-center justify-center cursor-pointer"
+                  >
+                    Load Demo Repository (openai/tiktoken)
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setActiveTab("import-github")}
+                    className="h-[40px] px-[20px] rounded-buttons bg-ink-black text-paper-white hover:bg-ink-black/90 active:scale-95 transition-all text-[15px] font-w500 inline-flex items-center justify-center cursor-pointer"
+                  >
+                    Import Repository
+                  </button>
+                )}
               </div>
             ) : (
               <>

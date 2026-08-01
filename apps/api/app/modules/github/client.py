@@ -77,7 +77,7 @@ class GitHubClient:
 
     async def get_repository(
         self,
-        access_token: str,
+        access_token: str | None,
         *,
         github_id: str | None = None,
         full_name: str | None = None,

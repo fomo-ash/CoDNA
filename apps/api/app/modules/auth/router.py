@@ -23,6 +23,14 @@ async def github_login(
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
 
 
+@router.get("/demo/login", response_model=AuthTokenResponse, status_code=status.HTTP_200_OK)
+async def demo_login(
+    session: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
+) -> AuthTokenResponse:
+    return await service.authenticate_demo_user(session)
+
+
 @router.get("/github/callback", response_model=AuthTokenResponse, status_code=status.HTTP_200_OK)
 async def github_callback(
     code: str = Query(...),

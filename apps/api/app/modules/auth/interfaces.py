@@ -19,6 +19,9 @@ class AuthService(Protocol):
     ) -> AuthTokenResponse:
         ...
 
+    async def authenticate_demo_user(self, session: AsyncSession) -> AuthTokenResponse:
+        ...
+
     async def get_current_user(self, session: AsyncSession, user_id: str) -> CurrentUser:
         ...
 

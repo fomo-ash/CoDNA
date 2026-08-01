@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import api from "../lib/api";
+import api, { isDemoMode } from "../lib/api";
 import { User } from "../types/api";
 import Header from "../components/Header";
 import {
@@ -41,6 +41,7 @@ export default function Home() {
 
   const handleLogout = () => {
     localStorage.removeItem("codedna_jwt");
+    localStorage.removeItem("codna_demo_mode");
     setUser(null);
     router.refresh();
   };
@@ -49,6 +50,12 @@ export default function Home() {
     setIsValidating(true);
     setLoginError("");
     try {
+      if (isDemoMode) {
+        const response = await api.githubCallback("demo", "demo");
+        localStorage.setItem("codedna_jwt", response.access_token);
+        router.push("/dashboard");
+        return;
+      }
       const response = await api.getGithubLoginUrl();
       if (response && response.authorization_url) {
         window.location.href = response.authorization_url;
@@ -101,6 +108,12 @@ export default function Home() {
             CoDNA extracts architecture mapping, indexes file parameters, and tracks indexing jobs in the background. It reads like a spread, interacts like an asset.
           </p>
 
+          {isDemoMode && (
+            <p className="relative z-10 mb-6 rounded-buttons border border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900">
+              Read-only judge demo: explore a pre-indexed repository snapshot. No GitHub, provider key, or backend setup is required.
+            </p>
+          )}
+
           <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-[16px] mb-[16px] w-full max-w-md sm:max-w-none px-[24px]">
             <button
               onClick={handleLoginStart}
@@ -112,24 +125,50 @@ export default function Home() {
                   <span className="w-[16px] h-[16px] rounded-full border border-white border-t-transparent animate-spin mr-[10px]" />
                   Connecting...
                 </>
-              ) : (
-                "Continue with GitHub"
-              )}
+              ) : isDemoMode ? "Explore demo workspace" : "Continue with GitHub"}
             </button>
             <button
-              onClick={() => alert("Booking a demo is currently offline. Please use GitHub login to explore the dashboard.")}
+              onClick={() => alert(isDemoMode ? "This build is already the read-only demo workspace." : "Booking a demo is currently offline. Please use GitHub login to explore the dashboard.")}
               className="w-full sm:w-auto h-[48px] px-[32px] rounded-buttons bg-transparent text-ink-black border-2 border-ink-black hover:bg-mist-gray active:scale-[0.98] transition-all text-[16px] font-normal flex items-center justify-center cursor-pointer"
             >
               Book a demo
             </button>
           </div>
 
-          <button
-            onClick={handleLoginStart}
-            className="relative z-10 text-[13px] text-slate-gray hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer mb-[64px]"
-          >
-            Or authenticate with access token / launch demo mode
-          </button>
+          <div className="relative z-10 text-[13px] text-slate-gray mb-[64px] flex items-center gap-1">
+            {isDemoMode ? (
+              <button
+                onClick={handleLoginStart}
+                className="hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer"
+              >
+                Explore the pre-indexed evidence workspace
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleLoginStart}
+                  className="hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer"
+                >
+                  Or authenticate with access token
+                </button>
+                <span>/</span>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await api.demoLogin();
+                      localStorage.setItem("codedna_jwt", response.access_token);
+                      window.location.href = "/dashboard";
+                    } catch (err) {
+                      alert("Failed to launch demo mode.");
+                    }
+                  }}
+                  className="hover:text-ink-black transition-colors underline underline-offset-4 cursor-pointer"
+                >
+                  launch demo mode
+                </button>
+              </>
+            )}
+          </div>
 
           {/* Collage of Floating Artifacts */}
           <div className="relative z-10 w-full h-[480px] max-w-5xl mx-auto hidden lg:block">

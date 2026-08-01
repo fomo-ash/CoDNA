@@ -62,6 +62,32 @@ class AuthServiceImpl:
             user=CurrentUser.model_validate(user),
         )
 
+    async def authenticate_demo_user(self, session: AsyncSession) -> AuthTokenResponse:
+        # Create or fetch the shared demo user
+        demo_github_id = "demo_user_id"
+        result = await session.execute(select(User).where(User.github_id == demo_github_id))
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            user = User(
+                github_id=demo_github_id,
+                username="demo_user",
+                email="demo@codna.io",
+                name="Demo User",
+                avatar_url="https://github.com/ghost.png",
+                github_access_token=None,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
+        access_token, expires_in = create_access_token(self.settings, str(user.id))
+        return AuthTokenResponse(
+            access_token=access_token,
+            expires_in=expires_in,
+            user=CurrentUser.model_validate(user),
+        )
+
     async def get_current_user(self, session: AsyncSession, user_id: str) -> CurrentUser:
         user = await self.get_current_user_record(session, user_id)
         return CurrentUser.model_validate(user)
