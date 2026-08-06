@@ -15,6 +15,7 @@ import {
   RepositoryHistoryArtifact,
 } from "../../../types/api";
 import Header from "../../../components/Header";
+import FileTreeExplorer from "../../../components/FileTreeExplorer";
 
 interface PageProps {
   params: Promise<{ id: string }> | { id: string };
@@ -39,7 +40,7 @@ function RepositoryDetailsContent({ params }: PageProps) {
   // --- Tab 2: Files Registry States ---
   const [files, setFiles] = useState<RepositoryFile[]>([]);
   const [filesPage, setFilesPage] = useState(1);
-  const [filesPageSize] = useState(30);
+  const [filesPageSize] = useState(200);
   const [hasNextFilesPage, setHasNextFilesPage] = useState(false);
   const [isFilesLoading, setIsFilesLoading] = useState(false);
   const [filesSearch, setFilesSearch] = useState("");
@@ -592,102 +593,21 @@ function RepositoryDetailsContent({ params }: PageProps) {
               </div>
             )}
 
-            {/* TAB CONTENT: Files */}
+            {/* TAB CONTENT: Files — VS Code-style Tree Explorer */}
             {activeTab === "files" && (
-              <div className="space-y-[24px] animate-in fade-in duration-200">
-                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-[16px] bg-fog-white border border-ink-black/[0.05] p-[16px] rounded-cards">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      placeholder="Filter folder or filename (e.g. src/utils)..."
-                      value={filesSearch}
-                      onChange={(e) => {
-                        setFilesSearch(e.target.value);
-                        setFilesPage(1);
-                      }}
-                      className="w-full bg-paper-white border border-ink-black/[0.1] rounded-inputs px-[16px] py-[8px] text-[14px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black transition-all"
-                    />
-                  </div>
-                  <div className="flex-shrink-0">
-                    <select
-                      value={filesLanguageFilter}
-                      onChange={(e) => {
-                        setFilesLanguageFilter(e.target.value);
-                        setFilesPage(1);
-                      }}
-                      className="bg-paper-white border border-ink-black/[0.1] rounded-inputs px-[16px] py-[8px] text-[14px] font-sohne text-ink-black focus:outline-none focus:ring-1 focus:ring-ink-black transition-all cursor-pointer"
-                    >
-                      <option value="">All Languages</option>
-                      {languagesList.map((lang) => (
-                        <option key={lang} value={lang}>{lang}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="bg-paper-white rounded-cards border border-ink-black/[0.05] shadow-subtle p-[20px]">
-                  {isFilesLoading && files.length === 0 ? (
-                    <div className="py-[80px] text-center text-slate-gray">Cataloging files...</div>
-                  ) : files.length === 0 ? (
-                    <div className="py-[80px] text-center text-slate-gray">No files match your filters.</div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-[14px]">
-                        <thead>
-                          <tr className="border-b border-mist-gray pb-[8px] text-ash-gray font-w500 tracking-wider">
-                            <th className="py-[10px] px-[12px]">Path</th>
-                            <th className="py-[10px] px-[12px]">Language</th>
-                            <th className="py-[10px] px-[12px]">Size</th>
-                            <th className="py-[10px] px-[12px] text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-mist-gray">
-                          {files.map((file) => (
-                            <tr key={file.id} className="hover:bg-fog-white transition-colors">
-                              <td className="py-[12px] px-[12px] font-mono text-[13px] text-ink-black truncate max-w-[400px]">
-                                {file.path}
-                              </td>
-                              <td className="py-[12px] px-[12px] text-slate-gray">
-                                {file.is_binary ? "Binary" : file.language || "Unknown"}
-                              </td>
-                              <td className="py-[12px] px-[12px] text-slate-gray">
-                                {formatBytes(file.size_bytes)}
-                              </td>
-                              <td className="py-[12px] px-[12px] text-right">
-                                <button
-                                  onClick={() => alert(`File details:\nPath: ${file.path}\nSize: ${formatBytes(file.size_bytes)}\nType: ${file.is_binary ? "Binary" : file.language || "Unknown"}`)}
-                                  className="text-[13px] text-slate-gray hover:text-ink-black transition-colors"
-                                >
-                                  View Meta
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between border-t border-mist-gray mt-[24px] pt-[16px] text-[13px] text-slate-gray">
-                    <span>Showing page {filesPage}</span>
-                    <div className="flex items-center gap-[8px]">
-                      <button
-                        disabled={filesPage === 1}
-                        onClick={() => setFilesPage((p) => Math.max(1, p - 1))}
-                        className="h-[32px] px-[12px] rounded-buttons bg-transparent border border-mist-gray text-slate-gray hover:text-ink-black disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[13px]"
-                      >
-                        Previous
-                      </button>
-                      <button
-                        disabled={!hasNextFilesPage}
-                        onClick={() => setFilesPage((p) => p + 1)}
-                        className="h-[32px] px-[12px] rounded-buttons bg-transparent border border-mist-gray text-slate-gray hover:text-ink-black disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[13px]"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <FileTreeExplorer
+                files={files}
+                isLoading={isFilesLoading}
+                filesSearch={filesSearch}
+                setFilesSearch={(v) => { setFilesSearch(v); setFilesPage(1); }}
+                filesLanguageFilter={filesLanguageFilter}
+                setFilesLanguageFilter={(v) => { setFilesLanguageFilter(v); setFilesPage(1); }}
+                languagesList={languagesList}
+                filesPage={filesPage}
+                setFilesPage={setFilesPage}
+                hasNextFilesPage={hasNextFilesPage}
+                formatBytes={formatBytes}
+              />
             )}
 
             {/* TAB CONTENT: Parse Results */}
